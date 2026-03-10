@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-10
+
+### Changed
+- macOS backend rewritten to use the clipboard approach instead of AppleScript's `save as picture`. PowerPoint now copies the selection (Cmd+C) and the image is read from NSPasteboard, preferring PDF vector data for maximum quality.
+- macOS backend now exports at **300 PPI** (e.g. 4000×2250 px for a standard 16:9 slide), rendered via NSBitmapImageRep.
+- Microsoft PowerPoint is now **required** on both macOS and Windows. The app disables the export button and shows an error message if PowerPoint is not detected.
+
+### Removed
+- Fallback backend (python-pptx + Pillow): removed. Full PowerPoint automation is now mandatory for correct transparency and fidelity.
+
 ## [0.1.0] - 2026-03-10
 
 ### Added
@@ -25,5 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Fikarn/pptx-exporter/releases/tag/v0.1.0

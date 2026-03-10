@@ -4,7 +4,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/Fikarn/pptx-exporter)](https://github.com/Fikarn/pptx-exporter/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Python desktop application that automates exporting the objects from each slide of a PowerPoint file as **transparent PNG images** — exactly as if you had manually selected all objects on each slide and used "Save as Picture" in PowerPoint.
+A Python desktop application that automates exporting the objects from each slide of a PowerPoint file as **transparent PNG images** — exactly as if you had manually selected all objects on each slide and used "Copy" → "Paste as Picture" in PowerPoint.
 
 ---
 
@@ -18,27 +18,25 @@ Exporting a PowerPoint slide as a whole (File → Export) always produces an ima
 
 For every slide, the app:
 
-1. Adds an invisible, transparent, borderless rectangle exactly the size of the slide. This acts as a bounding anchor so the exported PNG is always the full slide dimensions, regardless of where individual objects sit.
-2. Selects all objects on the slide.
-3. Exports the selection as a transparent PNG (`slide_01.png`, `slide_02.png`, …).
-4. Removes the bounding rectangle, leaving the original file unmodified.
+1. Opens the original `.pptx` file in Microsoft PowerPoint.
+2. Navigates to the slide and adds an invisible, transparent, borderless rectangle exactly the size of the slide. This acts as a bounding anchor so the exported PNG always has the full slide dimensions, regardless of where individual objects sit.
+3. Selects all objects (Cmd+A / Ctrl+A) and copies to the clipboard (Cmd+C / Ctrl+C).
+4. Reads the clipboard image — preferring PDF vector data for maximum fidelity, falling back to TIFF or PNG.
+5. Renders the clipboard data into a **300 PPI** bitmap (e.g. 4000×2250 px for a standard 16:9 slide) and saves it as a transparent PNG (`slide_01.png`, `slide_02.png`, …).
+6. Closes the presentation without saving — the original file is never modified.
 
 ---
 
-## Backends
+## Requirements
 
-pptx-exporter detects your OS and whether Microsoft PowerPoint is installed at startup, and picks the best available backend:
+Microsoft PowerPoint must be installed. The app detects PowerPoint at startup and disables the export button if it is not found.
 
-| OS | PowerPoint installed? | Backend used |
-|---|---|---|
-| macOS | Yes | AppleScript (osascript) — full transparency support |
-| macOS | No | python-pptx + Pillow (picture shapes only) |
-| Windows | Yes | COM automation (pywin32) — full transparency support |
-| Windows | No | python-pptx + Pillow (picture shapes only) |
+| OS | Backend |
+|---|---|
+| macOS | AppleScript (osascript) — 300 PPI, full transparency support |
+| Windows | COM automation (pywin32) — full transparency support |
 
 The active backend is displayed in the app's status banner when it launches.
-
-> **Note:** The fallback backend (python-pptx + Pillow) can only render embedded picture/image shapes. Text boxes, auto-shapes, and other vector elements are skipped with a warning. For full fidelity, use the app with Microsoft PowerPoint installed.
 
 ---
 
