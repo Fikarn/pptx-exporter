@@ -3,8 +3,6 @@
 import logging
 import os
 import platform
-import shutil
-import subprocess
 from pathlib import Path
 
 

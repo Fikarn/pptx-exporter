@@ -17,7 +17,6 @@ objects.
 """
 
 import logging
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -51,7 +50,7 @@ end tell
 _SCRIPT_ADD_BOUNDING_RECT = """\
 tell application "Microsoft PowerPoint"
     set oSlide to slide {slide_num} of active presentation
-    set newShape to make new shape at oSlide with properties {{auto shape type:autoshape rectangle, left position:0, top:0, width:{slide_w}, height:{slide_h}}}
+    set newShape to make new shape at oSlide with properties {{auto shape type:autoshape rectangle, left position:0, top:0, width:{slide_w}, height:{slide_h}}}  # noqa: E501
     set visible of fill format of newShape to false
     set line weight of line format of newShape to 0
     set transparency of line format of newShape to 1.0
@@ -107,7 +106,7 @@ set img to current application's NSImage's alloc()'s initWithData:srcData
 if img is missing value then return "no_image"
 
 -- Create a bitmap at the target resolution
-set bitmapRep to (current application's NSBitmapImageRep's alloc()'s initWithBitmapDataPlanes:(missing value) pixelsWide:targetW pixelsHigh:targetH bitsPerSample:8 samplesPerPixel:4 hasAlpha:true isPlanar:false colorSpaceName:(current application's NSCalibratedRGBColorSpace) bytesPerRow:0 bitsPerPixel:0)
+set bitmapRep to (current application's NSBitmapImageRep's alloc()'s initWithBitmapDataPlanes:(missing value) pixelsWide:targetW pixelsHigh:targetH bitsPerSample:8 samplesPerPixel:4 hasAlpha:true isPlanar:false colorSpaceName:(current application's NSCalibratedRGBColorSpace) bytesPerRow:0 bitsPerPixel:0)  # noqa: E501
 bitmapRep's setSize:(current application's NSMakeSize(targetW, targetH))
 
 -- Render the image into the bitmap at target size
@@ -119,7 +118,7 @@ img's drawInRect:(current application's NSMakeRect(0, 0, targetW, targetH))
 current application's NSGraphicsContext's restoreGraphicsState()
 
 -- Save as PNG
-set pngData to (bitmapRep's representationUsingType:(current application's NSBitmapImageFileTypePNG) |properties|:(missing value))
+set pngData to (bitmapRep's representationUsingType:(current application's NSBitmapImageFileTypePNG) |properties|:(missing value))  # noqa: E501
 if pngData is missing value then return "convert_failed"
 
 set writeResult to (pngData's writeToFile:"{out_path}" atomically:true) as boolean

@@ -1,8 +1,5 @@
 """Unit tests for pptx_exporter.utils."""
 
-import os
-import platform
-import tempfile
 from pathlib import Path
 from unittest import mock
 

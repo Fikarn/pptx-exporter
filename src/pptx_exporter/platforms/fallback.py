@@ -16,9 +16,6 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from pptx import Presentation
-from pptx.dml.color import RGBColor
-from pptx.enum.dml import MSO_THEME_COLOR
-from pptx.util import Emu
 
 from ..utils import slide_output_name
 

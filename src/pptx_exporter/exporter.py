@@ -100,4 +100,3 @@ class Exporter:
         from .platforms.windows import export_slides
 
         export_slides(pptx, out, progress_callback=progress_callback)
-

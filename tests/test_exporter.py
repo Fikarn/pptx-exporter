@@ -1,6 +1,5 @@
 """Unit tests for pptx_exporter.exporter."""
 
-import tempfile
 from pathlib import Path
 from unittest import mock
 

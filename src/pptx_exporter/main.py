@@ -1,7 +1,5 @@
 """Entry point — launches the pptx-exporter GUI."""
 
-import sys
-
 
 def main() -> None:
     """Start the Tkinter application."""
