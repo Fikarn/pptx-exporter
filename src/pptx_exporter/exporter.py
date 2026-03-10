@@ -22,7 +22,7 @@ class Exporter:
     """High-level export controller.
 
     Attributes:
-        backend: One of ``'macos'``, ``'windows'``, or ``'fallback'``.
+        backend: One of ``'macos'``, ``'windows'``, or ``'not_found'``.
         backend_label: Human-readable description of the active backend.
     """
 
@@ -64,12 +64,16 @@ class Exporter:
             self.backend,
         )
 
+        if self.backend == "not_found":
+            raise RuntimeError(
+                "Microsoft PowerPoint is required but was not found. "
+                "Please install PowerPoint and try again."
+            )
+
         if self.backend == "macos":
             self._export_macos(pptx, out, progress_callback)
         elif self.backend == "windows":
             self._export_windows(pptx, out, progress_callback)
-        else:
-            self._export_fallback(pptx, out, progress_callback)
 
         logger.info("Export complete → %s", out)
 
@@ -97,12 +101,3 @@ class Exporter:
 
         export_slides(pptx, out, progress_callback=progress_callback)
 
-    def _export_fallback(
-        self,
-        pptx: Path,
-        out: Path,
-        progress_callback: Optional[Callable[[int, int], None]],
-    ) -> None:
-        from .platforms.fallback import export_slides
-
-        export_slides(pptx, out, progress_callback=progress_callback)

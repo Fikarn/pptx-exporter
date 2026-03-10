@@ -129,7 +129,7 @@ def test_detect_backend_macos_without_powerpoint() -> None:
         mock.patch("pptx_exporter.utils.detect_os", return_value="macos"),
         mock.patch("pptx_exporter.utils.is_powerpoint_installed_macos", return_value=False),
     ):
-        assert detect_backend() == "fallback"
+        assert detect_backend() == "not_found"
 
 
 def test_detect_backend_windows_with_powerpoint() -> None:
@@ -145,12 +145,12 @@ def test_detect_backend_windows_without_powerpoint() -> None:
         mock.patch("pptx_exporter.utils.detect_os", return_value="windows"),
         mock.patch("pptx_exporter.utils.is_powerpoint_installed_windows", return_value=False),
     ):
-        assert detect_backend() == "fallback"
+        assert detect_backend() == "not_found"
 
 
 def test_detect_backend_other_os() -> None:
     with mock.patch("pptx_exporter.utils.detect_os", return_value="other"):
-        assert detect_backend() == "fallback"
+        assert detect_backend() == "not_found"
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def test_detect_backend_other_os() -> None:
 
 
 def test_backend_description_known_backends() -> None:
-    for backend in ("macos", "windows", "fallback"):
+    for backend in ("macos", "windows", "not_found"):
         desc = backend_description(backend)
         assert isinstance(desc, str)
         assert len(desc) > 0

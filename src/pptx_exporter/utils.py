@@ -89,13 +89,16 @@ def is_powerpoint_installed_windows() -> bool:
 
 
 def detect_backend() -> str:
-    """Return the backend that will be used: 'macos', 'windows', or 'fallback'."""
+    """Return the backend that will be used: 'macos', 'windows', or 'not_found'.
+
+    Microsoft PowerPoint is required. If it is not found, returns 'not_found'.
+    """
     os_name = detect_os()
     if os_name == "macos" and is_powerpoint_installed_macos():
         return "macos"
     if os_name == "windows" and is_powerpoint_installed_windows():
         return "windows"
-    return "fallback"
+    return "not_found"
 
 
 def backend_description(backend: str) -> str:
@@ -103,6 +106,6 @@ def backend_description(backend: str) -> str:
     descriptions = {
         "macos": "macOS — Microsoft PowerPoint (AppleScript automation)",
         "windows": "Windows — Microsoft PowerPoint (COM automation)",
-        "fallback": "Fallback — python-pptx + Pillow (no PowerPoint required)",
+        "not_found": "PowerPoint not found — please install Microsoft PowerPoint",
     }
     return descriptions.get(backend, backend)

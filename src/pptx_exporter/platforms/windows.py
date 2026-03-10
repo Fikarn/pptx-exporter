@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
+from ..utils import slide_output_name
+
 logger = logging.getLogger(__name__)
 
 # PowerPoint constants (from Microsoft Office type library)
@@ -54,7 +56,7 @@ def export_slides(
     try:
         prs = app.Presentations.Open(
             pptx_str,
-            ReadOnly=_MSO_TRUE,
+            ReadOnly=_MSO_FALSE,
             Untitled=_MSO_FALSE,
             WithWindow=_MSO_FALSE,
         )
@@ -69,8 +71,6 @@ def export_slides(
             slide_h_pts,
         )
 
-        width = len(str(total))
-
         for idx in range(total):
             slide_num = idx + 1
             if progress_callback:
@@ -79,7 +79,7 @@ def export_slides(
             slide = prs.Slides(slide_num)
             logger.debug("Processing slide %d/%d", slide_num, total)
 
-            out_name = f"slide_{slide_num:0{width}d}.png"
+            out_name = slide_output_name(idx, total)
             out_path = str(output_dir / out_name)
 
             # Step 1 — add invisible bounding rectangle
@@ -95,14 +95,7 @@ def export_slides(
             bounding_id = bounding.Id
             logger.debug("Added bounding rect, shape id: %d", bounding_id)
 
-            # Step 2 — select all shapes
-            slide.Select()
-            slide.Shapes.SelectAll()
-            selection = app.ActiveWindow.Selection if hasattr(app, "ActiveWindow") else None
-
-            # Step 3 — export selection as PNG
-            # The cleanest cross-shape method: export each shape group via
-            # ShapeRange.Export (available since PPT 2010).
+            # Step 2+3 — export all shapes as PNG via ShapeRange.Export
             try:
                 shape_range = slide.Shapes.Range()
                 # Export the full range as PNG

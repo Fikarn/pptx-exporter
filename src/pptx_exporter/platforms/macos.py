@@ -1,17 +1,28 @@
 """macOS backend: drive Microsoft PowerPoint via AppleScript / osascript.
 
-Per-slide workflow (mirrors manual user actions):
-1. Add a transparent, borderless full-slide rectangle via AppleScript.
-2. Select all objects on the slide (cmd+a equivalent).
-3. Export the selection as a transparent PNG via "Save as Picture".
-4. Remove the bounding rectangle.
+Workflow:
+1. Open the original .pptx in PowerPoint.
+2. For each slide:
+   a. Add an invisible full-slide rectangle via AppleScript.
+   b. Select all shapes (Esc, Esc, Cmd+A).
+   c. Copy the selection (Cmd+C) — this captures all objects including
+      placeholders as a transparent PNG on the clipboard.
+   d. Save the clipboard PNG to disk via NSPasteboard.
+3. Close without saving — the original file is never modified.
+
+The clipboard approach is necessary because AppleScript's ``save as picture``
+only works on a single shape, and PowerPoint refuses to group placeholder
+shapes. Copying a multi-selection preserves transparency and includes all
+objects.
 """
 
 import logging
+import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Callable, Optional
+
+from ..utils import slide_output_name
 
 logger = logging.getLogger(__name__)
 
@@ -19,109 +30,113 @@ logger = logging.getLogger(__name__)
 # AppleScript templates
 # ---------------------------------------------------------------------------
 
-_SCRIPT_OPEN_PRESENTATION = """\
+_SCRIPT_OPEN = """\
 tell application "Microsoft PowerPoint"
-    set theDoc to open POSIX file "{pptx_path}"
-    set thePath to POSIX path of (path of theDoc)
-    return thePath
+    activate
+    open POSIX file "{pptx_path}"
+    delay 2
 end tell
 """
 
-_SCRIPT_SLIDE_COUNT = """\
+_SCRIPT_GO_TO_SLIDE = """\
 tell application "Microsoft PowerPoint"
-    tell document "{doc_name}"
-        return count of slides
-    end tell
+    activate
+    set theView to view of active window
+    set slide of theView to slide {slide_num} of active presentation
+    delay 0.5
 end tell
 """
 
-_SCRIPT_SLIDE_DIMENSIONS = """\
-tell application "Microsoft PowerPoint"
-    tell document "{doc_name}"
-        set w to slide width
-        set h to slide height
-        return (w as string) & "," & (h as string)
-    end tell
-end tell
-"""
-
+# Add an invisible full-slide rectangle to the current slide.
 _SCRIPT_ADD_BOUNDING_RECT = """\
 tell application "Microsoft PowerPoint"
-    tell document "{doc_name}"
-        tell slide {slide_num}
-            set theShape to make new shape at end of shapes with properties {{\\
-                shape type:auto shape, \\
-                auto shape type:rounded rectangle, \\
-                left position:0, \\
-                top:0, \\
-                width:{width}, \\
-                height:{height}}}
-            tell theShape
-                tell fill
-                    set visible to false
-                end tell
-                tell line format
-                    set line style to no line
-                end tell
-            end tell
-            return (id of theShape) as string
-        end tell
+    set oSlide to slide {slide_num} of active presentation
+    set newShape to make new shape at oSlide with properties {{auto shape type:autoshape rectangle, left position:0, top:0, width:{slide_w}, height:{slide_h}}}
+    set visible of fill format of newShape to false
+    set line weight of line format of newShape to 0
+    set transparency of line format of newShape to 1.0
+    return "ok"
+end tell
+"""
+
+# Select all shapes on the current slide and copy to clipboard.
+_SCRIPT_SELECT_ALL_AND_COPY = """\
+tell application "Microsoft PowerPoint" to activate
+delay 0.3
+tell application "System Events"
+    tell process "Microsoft PowerPoint"
+        key code 53
+        delay 0.2
+        key code 53
+        delay 0.2
+        keystroke "a" using {command down}
+        delay 0.3
+        keystroke "c" using {command down}
+        delay 0.5
     end tell
 end tell
 """
 
-_SCRIPT_SELECT_ALL_AND_EXPORT = """\
-tell application "Microsoft PowerPoint"
-    tell document "{doc_name}"
-        tell slide {slide_num}
-            -- select all shapes
-            set sel to {}
-            repeat with s in shapes
-                set end of sel to s
-            end repeat
-            if (count of sel) = 0 then return "no_shapes"
-            select (item 1 of sel)
-            repeat with i from 2 to count of sel
-                tell application "System Events"
-                    key code 0 using command down
-                end tell
-            end repeat
-            -- export as picture
-            save as picture (item 1 of sel) in "{out_path}" \\
-                as save as PNG
-        end tell
-    end tell
-end tell
-"""
+# Save clipboard image data to a high-resolution PNG via NSPasteboard (Cocoa).
+# Tries PDF (vector) first for best quality, then TIFF, then PNG.
+# Renders into a bitmap at the target pixel dimensions for 300 PPI output.
+_SCRIPT_CLIPBOARD_TO_PNG = """\
+use framework "AppKit"
+use scripting additions
 
-_SCRIPT_EXPORT_SLIDE_SHAPES = """\
-tell application "Microsoft PowerPoint"
-    tell document "{doc_name}"
-        tell slide {slide_num}
-            set shapeList to every shape
-            if (count of shapeList) is 0 then return "no_shapes"
-            tell shapeList to select
-            save selection of document "{doc_name}" in "{out_path}" as save as PNG
-        end tell
-    end tell
-end tell
-"""
+set pb to current application's NSPasteboard's generalPasteboard()
+set targetW to {target_w} as integer
+set targetH to {target_h} as integer
 
-_SCRIPT_REMOVE_SHAPE_BY_ID = """\
-tell application "Microsoft PowerPoint"
-    tell document "{doc_name}"
-        tell slide {slide_num}
-            delete (first shape whose id is {shape_id})
-        end tell
-    end tell
-end tell
+-- Collect clipboard data: prefer PDF (vector), then TIFF, then PNG
+set srcData to missing value
+set pdfType to current application's NSPasteboardTypePDF
+set srcData to pb's dataForType:pdfType
+if srcData is missing value then
+    set tiffType to current application's NSPasteboardTypeTIFF
+    set srcData to pb's dataForType:tiffType
+end if
+if srcData is missing value then
+    set pngType to current application's NSPasteboardTypePNG
+    set srcData to pb's dataForType:pngType
+end if
+if srcData is missing value then return "no_image"
+
+-- Build NSImage from clipboard data
+set img to current application's NSImage's alloc()'s initWithData:srcData
+if img is missing value then return "no_image"
+
+-- Create a bitmap at the target resolution
+set bitmapRep to (current application's NSBitmapImageRep's alloc()'s initWithBitmapDataPlanes:(missing value) pixelsWide:targetW pixelsHigh:targetH bitsPerSample:8 samplesPerPixel:4 hasAlpha:true isPlanar:false colorSpaceName:(current application's NSCalibratedRGBColorSpace) bytesPerRow:0 bitsPerPixel:0)
+bitmapRep's setSize:(current application's NSMakeSize(targetW, targetH))
+
+-- Render the image into the bitmap at target size
+current application's NSGraphicsContext's saveGraphicsState()
+set ctx to (current application's NSGraphicsContext's graphicsContextWithBitmapImageRep:bitmapRep)
+current application's NSGraphicsContext's setCurrentContext:ctx
+ctx's setImageInterpolation:(current application's NSImageInterpolationHigh)
+img's drawInRect:(current application's NSMakeRect(0, 0, targetW, targetH))
+current application's NSGraphicsContext's restoreGraphicsState()
+
+-- Save as PNG
+set pngData to (bitmapRep's representationUsingType:(current application's NSBitmapImageFileTypePNG) |properties|:(missing value))
+if pngData is missing value then return "convert_failed"
+
+set writeResult to (pngData's writeToFile:"{out_path}" atomically:true) as boolean
+if writeResult then return "ok"
+return "write_failed"
 """
 
 _SCRIPT_CLOSE_WITHOUT_SAVING = """\
 tell application "Microsoft PowerPoint"
-    close document "{doc_name}" saving no
+    close active presentation saving no
 end tell
 """
+
+
+def _escape_applescript_string(s: str) -> str:
+    """Escape a string for safe embedding in AppleScript double-quoted literals."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _run_applescript(script: str) -> str:
@@ -148,37 +163,31 @@ def export_slides(
 ) -> None:
     """Export every slide of *pptx_path* as a transparent PNG into *output_dir*.
 
-    Uses AppleScript to drive Microsoft PowerPoint for Mac.
-
-    Args:
-        pptx_path: Resolved path to the .pptx file.
-        output_dir: Resolved path to the output directory.
-        progress_callback: Optional callable(slide_index, total_slides).
+    Opens the original file in PowerPoint. For each slide: adds an invisible
+    bounding rectangle, selects all, copies to clipboard, and saves the
+    clipboard PNG via NSPasteboard. Closes without saving.
     """
+    # Read slide metadata via python-pptx (no modification).
+    from pptx import Presentation
+    prs = Presentation(str(pptx_path))
+    total = len(prs.slides)
+    slide_w = round(prs.slide_width / 12700, 1)   # EMU → points
+    slide_h = round(prs.slide_height / 12700, 1)   # EMU → points
+    # Target pixel dimensions for 300 PPI output (points are 1/72 inch).
+    target_ppi = 300
+    target_w = int(round(slide_w / 72 * target_ppi))
+    target_h = int(round(slide_h / 72 * target_ppi))
+    logger.info("Slide count: %d, dimensions: %.0f x %.0f pts, target: %d x %d px (%d PPI)",
+                total, slide_w, slide_h, target_w, target_h, target_ppi)
+
+    # Open the original file in PowerPoint.
     pptx_posix = str(pptx_path)
-    doc_name = pptx_path.name
-
     logger.info("Opening presentation in PowerPoint: %s", pptx_posix)
-
-    # Open the presentation
-    open_script = _SCRIPT_OPEN_PRESENTATION.format(pptx_path=pptx_posix)
-    _run_applescript(open_script)
+    _run_applescript(_SCRIPT_OPEN.format(
+        pptx_path=_escape_applescript_string(pptx_posix)
+    ))
 
     try:
-        # Get slide count
-        count_script = _SCRIPT_SLIDE_COUNT.format(doc_name=doc_name)
-        total = int(_run_applescript(count_script))
-        logger.info("Slide count: %d", total)
-
-        # Get slide dimensions (points)
-        dim_script = _SCRIPT_SLIDE_DIMENSIONS.format(doc_name=doc_name)
-        dims = _run_applescript(dim_script).split(",")
-        slide_w_pts = float(dims[0].strip())
-        slide_h_pts = float(dims[1].strip())
-        logger.debug("Slide dimensions: %.1f x %.1f pts", slide_w_pts, slide_h_pts)
-
-        width = len(str(total))
-
         for idx in range(total):
             slide_num = idx + 1
             if progress_callback:
@@ -186,51 +195,45 @@ def export_slides(
 
             logger.debug("Processing slide %d/%d", slide_num, total)
 
-            out_name = f"slide_{slide_num:0{width}d}.png"
-            out_path = str(output_dir / out_name)
+            out_name = slide_output_name(idx, total)
+            out_path = output_dir / out_name
 
-            # Step 1 — add invisible bounding rectangle
-            add_script = _SCRIPT_ADD_BOUNDING_RECT.format(
-                doc_name=doc_name,
-                slide_num=slide_num,
-                width=slide_w_pts,
-                height=slide_h_pts,
+            # Step 1: Navigate to the slide.
+            _run_applescript(
+                _SCRIPT_GO_TO_SLIDE.format(slide_num=slide_num)
             )
-            shape_id_str = _run_applescript(add_script).strip()
-            logger.debug("Added bounding rect, shape id: %s", shape_id_str)
 
-            # Steps 2+3 — select all shapes and export as PNG
-            export_script = _SCRIPT_EXPORT_SLIDE_SHAPES.format(
-                doc_name=doc_name,
-                slide_num=slide_num,
-                out_path=out_path,
-            )
-            result = _run_applescript(export_script)
-            if result == "no_shapes":
-                logger.warning("Slide %d has no shapes, skipping", slide_num)
-            else:
-                logger.info("Exported slide %d → %s", slide_num, out_path)
-
-            # Step 4 — remove bounding rectangle
-            try:
-                shape_id = int(shape_id_str)
-                remove_script = _SCRIPT_REMOVE_SHAPE_BY_ID.format(
-                    doc_name=doc_name,
+            # Step 2: Add invisible full-slide bounding rectangle.
+            _run_applescript(
+                _SCRIPT_ADD_BOUNDING_RECT.format(
                     slide_num=slide_num,
-                    shape_id=shape_id,
+                    slide_w=slide_w,
+                    slide_h=slide_h,
                 )
-                _run_applescript(remove_script)
-                logger.debug("Removed bounding rect from slide %d", slide_num)
-            except Exception as exc:
-                logger.warning(
-                    "Could not remove bounding rect from slide %d: %s", slide_num, exc
+            )
+
+            # Step 3: Select all shapes and copy to clipboard.
+            _run_applescript(_SCRIPT_SELECT_ALL_AND_COPY)
+
+            # Step 4: Save clipboard as high-resolution PNG.
+            save_result = _run_applescript(
+                _SCRIPT_CLIPBOARD_TO_PNG.format(
+                    out_path=_escape_applescript_string(str(out_path)),
+                    target_w=target_w,
+                    target_h=target_h,
                 )
+            )
+
+            if save_result == "ok":
+                logger.info("Exported slide %d → %s", slide_num, out_path)
+            elif save_result == "no_image":
+                logger.warning("Slide %d: no image data on clipboard", slide_num)
+            else:
+                logger.warning("Slide %d: clipboard save returned '%s'", slide_num, save_result)
 
     finally:
-        # Always close the document without saving
         try:
-            close_script = _SCRIPT_CLOSE_WITHOUT_SAVING.format(doc_name=doc_name)
-            _run_applescript(close_script)
+            _run_applescript(_SCRIPT_CLOSE_WITHOUT_SAVING)
             logger.info("Closed presentation without saving")
         except Exception as exc:
             logger.warning("Could not close presentation: %s", exc)

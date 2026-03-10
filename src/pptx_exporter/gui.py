@@ -27,6 +27,8 @@ class App(tk.Tk):
         self._pptx_path: Optional[str] = None
         self._output_dir: Optional[str] = None
 
+        self._powerpoint_available = self._exporter.backend != "not_found"
+
         self._build_ui()
         self._update_run_button_state()
 
@@ -232,7 +234,7 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
 
     def _update_run_button_state(self) -> None:
-        ready = bool(self._pptx_path and self._output_dir)
+        ready = bool(self._powerpoint_available and self._pptx_path and self._output_dir)
         self._run_btn.config(state=tk.NORMAL if ready else tk.DISABLED)
 
     def _set_ui_busy(self, busy: bool) -> None:

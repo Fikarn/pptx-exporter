@@ -20,6 +20,8 @@ from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.util import Emu
 
+from ..utils import slide_output_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +65,6 @@ def export_slides(
     slide_h_px = _emu_to_px(slide_height_emu, dpi)
 
     total = len(prs.slides)
-    width = len(str(total))
 
     logger.info(
         "Fallback export: %d slides, %dx%d px @ %d dpi",
@@ -89,7 +90,7 @@ def export_slides(
         # Step 4 — remove bounding rectangle
         _remove_shape(slide, bounding_shape)
 
-        out_name = f"slide_{idx + 1:0{width}d}.png"
+        out_name = slide_output_name(idx, total)
         out_path = output_dir / out_name
         canvas.save(str(out_path), "PNG")
         logger.info("Saved %s", out_path)
