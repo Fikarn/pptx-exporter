@@ -48,7 +48,6 @@ jobs:
           VERSION="${{ github.ref_name }}"
           cd dist/mac
           zip -r "../../pptx-exporter-macos-${VERSION}.zip" pptx-exporter.app
-          echo "ASSET_MAC=pptx-exporter-macos-${VERSION}.zip" >> $GITHUB_ENV
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -57,11 +56,12 @@ jobs:
           path: "pptx-exporter-macos-${{ github.ref_name }}.zip"
           retention-days: 1
 
-  # ── 2b. Windows build ──────────────────────────────────────────────────────
+  # ── 2b. Windows build (best-effort) ───────────────────────────────────────
   build-windows:
     name: Build Windows .exe
     needs: test
     runs-on: windows-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -79,7 +79,6 @@ jobs:
           $version = "${{ github.ref_name }}"
           $zipName = "pptx-exporter-windows-${version}.zip"
           Compress-Archive -Path "dist\windows\pptx-exporter.exe" -DestinationPath $zipName
-          echo "ASSET_WIN=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -92,6 +91,7 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [build-macos, build-windows]
+    if: always() && needs.build-macos.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -99,17 +99,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Extract changelog section for this version
-        id: changelog
         run: |
           VERSION="${{ github.ref_name }}"
-          # Strip leading 'v' to match CHANGELOG section headers like ## [1.2.3]
           SEMVER="${VERSION#v}"
-          # Extract the block between this version header and the next ## header
           BODY=$(awk "/^## \[${SEMVER}\]/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
           if [ -z "$BODY" ]; then
             BODY="Release ${VERSION}"
           fi
-          # Write body to a file to avoid quoting issues
           echo "$BODY" > release_body.md
 
       - name: Download macOS artifact
@@ -117,8 +113,9 @@ jobs:
         with:
           name: macos-build
 
-      - name: Download Windows artifact
+      - name: Download Windows artifact (if available)
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: windows-build
 
