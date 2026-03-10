@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-03-10
+
+### Fixed
+- PyInstaller build: use a top-level `run.py` launcher instead of
+  `src/pptx_exporter/main.py` as the entry point, fixing the
+  "attempted relative import with no known parent package" crash on launch.
+
 ## [1.0.2] - 2026-03-10
 
 ### Fixed
@@ -65,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.2.0...v1.0.0

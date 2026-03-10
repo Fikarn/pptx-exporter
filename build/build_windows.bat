@@ -12,7 +12,7 @@ pyinstaller ^
   --collect-data tkinterdnd2 ^
   --add-data "vendor;vendor" ^
   --noconfirm ^
-  src\pptx_exporter\main.py
+  run.py
 
 if not exist dist\windows mkdir dist\windows
 move dist\pptx-exporter.exe dist\windows\

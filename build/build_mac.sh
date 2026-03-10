@@ -19,7 +19,7 @@ pyinstaller \
   --hidden-import "lxml._elementpath" \
   --osx-bundle-identifier "com.fikarn.pptx-exporter" \
   --noconfirm \
-  src/pptx_exporter/main.py
+  run.py
 
 mkdir -p dist/mac
 mv dist/pptx-exporter.app dist/mac/
