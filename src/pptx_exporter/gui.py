@@ -1,5 +1,6 @@
 """All UI code for pptx-exporter — built with CustomTkinter."""
 
+import json
 import logging
 import os
 import subprocess
@@ -11,7 +12,12 @@ from tkinter import filedialog
 from typing import Optional
 
 import customtkinter as ctk
-from tkinterdnd2 import DND_FILES, TkinterDnD
+
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    _DND_AVAILABLE = True
+except Exception:
+    _DND_AVAILABLE = False
 
 from .exporter import Exporter
 from .utils import configure_logging
@@ -48,14 +54,129 @@ _FONT_BODY_BOLD = ("system-ui", 13, "bold")
 _FONT_SMALL = ("system-ui", 11)
 _FONT_TITLE = ("system-ui", 15, "bold")
 
+_PPI_OPTIONS = [72, 150, 300]
+_PPI_LABELS = ["72 dpi", "150 dpi", "300 dpi"]
+
+# ---------------------------------------------------------------------------
+# Settings persistence (~/.pptx-exporter-settings.json)
+# ---------------------------------------------------------------------------
+
+_SETTINGS_PATH = Path.home() / ".pptx-exporter-settings.json"
+
+
+def _load_settings() -> dict:
+    try:
+        with open(_SETTINGS_PATH) as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _save_settings(data: dict) -> None:
+    try:
+        with open(_SETTINGS_PATH, "w") as fh:
+            json.dump(data, fh, indent=2)
+    except Exception as exc:
+        logger.debug("Could not save settings: %s", exc)
+
+
+def _load_tkdnd(tkroot) -> bool:
+    """Load the tkdnd extension, with a Tcl 9 compatibility fallback.
+
+    tkinterdnd2 bundles a tkdnd binary compiled for Tcl 8.  On Tcl 9 the
+    standard ``_require`` call fails.  This function pre-installs a
+    Tcl-9-compatible binary from ``vendor/tkdnd/<platform>/`` (shipped with
+    this repo) and patches the tkinterdnd2 package directory in-place *before*
+    any load attempt, so only the correct binary is ever loaded.
+    """
+    if not _DND_AVAILABLE:
+        return False
+
+    import os
+    import platform as _platform
+
+    system = _platform.system()
+    machine = _platform.machine()
+    platform_map = {
+        ("Darwin", "arm64"): "osx-arm64",
+        ("Darwin", "x86_64"): "osx-x64",
+        ("Linux", "aarch64"): "linux-arm64",
+        ("Linux", "x86_64"): "linux-x64",
+    }
+    platform_dir = platform_map.get((system, machine))
+
+    if platform_dir:
+        # Check whether a vendored Tcl-9-compatible binary is available
+        here = os.path.dirname(os.path.abspath(__file__))
+        vendor_dir = os.path.normpath(
+            os.path.join(here, "..", "..", "vendor", "tkdnd", platform_dir)
+        )
+        exts = (".dylib", ".so", ".dll")
+        vendor_lib = next(
+            (f for f in os.listdir(vendor_dir)
+             if f.startswith("libtkdnd") and f.endswith(exts)),
+            None,
+        ) if os.path.isdir(vendor_dir) else None
+
+        if vendor_lib:
+            try:
+                import shutil
+                import tkinterdnd2
+
+                mod_dir = os.path.join(
+                    os.path.dirname(tkinterdnd2.__file__), "tkdnd", platform_dir
+                )
+                dest_lib = os.path.join(mod_dir, vendor_lib)
+
+                # Install binary if not already present
+                if not os.path.exists(dest_lib):
+                    shutil.copy2(os.path.join(vendor_dir, vendor_lib), dest_lib)
+                    logger.debug("Installed vendored %s", vendor_lib)
+
+                # Patch pkgIndex.tcl to point at the new binary (once only)
+                pkg_index = os.path.join(mod_dir, "pkgIndex.tcl")
+                with open(pkg_index) as fh:
+                    content = fh.read()
+                version = (vendor_lib
+                           .replace("libtkdnd", "")
+                           .replace(".dylib", "")
+                           .replace(".so", ""))
+                old_lib = next(
+                    (f for f in os.listdir(mod_dir)
+                     if f.startswith("libtkdnd") and f.endswith(exts)
+                     and f != vendor_lib),
+                    None,
+                )
+                if old_lib and old_lib in content:
+                    old_ver = (old_lib
+                               .replace("libtkdnd", "")
+                               .replace(".dylib", "")
+                               .replace(".so", ""))
+                    content = content.replace(f"{old_lib} tkdnd", f"{vendor_lib} Tkdnd")
+                    content = content.replace(f"tkdnd {old_ver}", f"tkdnd {version}")
+                    with open(pkg_index, "w") as fh:
+                        fh.write(content)
+                    logger.debug("Patched pkgIndex.tcl → tkdnd %s", version)
+
+            except Exception as exc:
+                logger.debug("tkdnd vendor setup failed: %s", exc)
+
+    # Standard load — now works whether the binary was already compatible
+    # or was just installed/patched above
+    try:
+        TkinterDnD._require(tkroot)
+        return True
+    except Exception as exc:
+        logger.debug("tkdnd load failed: %s", exc)
+        return False
+
 
 class App(ctk.CTk):
     """Main application window."""
 
     def __init__(self) -> None:
         super().__init__()
-        # Enable drag-and-drop on this CustomTkinter window
-        TkinterDnD._require(self)
+        self._dnd_loaded = _load_tkdnd(self)
 
         configure_logging()
 
@@ -65,13 +186,22 @@ class App(ctk.CTk):
 
         self._exporter = Exporter()
         self._pptx_path: Optional[str] = None
-        self._output_dir: Optional[str] = None
         self._powerpoint_available = self._exporter.backend != "not_found"
         self._cancel_event: Optional[threading.Event] = None
 
+        settings = _load_settings()
+        self._ppi: int = settings.get("ppi", 300)
+        saved_out = settings.get("output_dir")
+        self._output_dir: Optional[str] = saved_out if saved_out and os.path.isdir(saved_out) else None
+
         self._build_ui()
-        self._register_drop_target()
         self._update_run_button_state()
+        # Defer DnD registration until the first event-loop tick so that the
+        # native macOS NSWindow is fully realized before macdnd::registerdragwidget
+        # is called.  Calling it during __init__ (before mainloop) means
+        # _window_exists is still False and the C-level registration silently fails.
+        if self._dnd_loaded:
+            self.after(0, self._register_drop_target)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -126,7 +256,8 @@ class App(ctk.CTk):
         ).grid(row=0, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
 
         self._file_card = _FileCard(
-            content, on_browse=self._browse_pptx, on_clear=self._clear_pptx
+            content, on_browse=self._browse_pptx, on_clear=self._clear_pptx,
+            dnd_available=self._dnd_loaded,
         )
         self._file_card.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
 
@@ -148,7 +279,7 @@ class App(ctk.CTk):
         out_row.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
         out_row.grid_columnconfigure(0, weight=1)
 
-        self._out_var = tk.StringVar(value="(none selected)")
+        self._out_var = tk.StringVar(value=self._output_dir or "(none selected)")
         ctk.CTkLabel(
             out_row,
             textvariable=self._out_var,
@@ -169,6 +300,30 @@ class App(ctk.CTk):
             border_color=_COLOR_BORDER,
             hover_color=_COLOR_BG_BASE,
         ).grid(row=0, column=1)
+
+        # Separator
+        ctk.CTkFrame(content, height=1, fg_color=_COLOR_BORDER, corner_radius=0).grid(
+            row=5, column=0, sticky="ew", padx=PAD
+        )
+
+        # Resolution section
+        ctk.CTkLabel(
+            content,
+            text="RESOLUTION",
+            font=_FONT_SMALL,
+            text_color=_COLOR_TEXT_SECONDARY,
+            anchor="w",
+        ).grid(row=6, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
+
+        initial_label = _PPI_LABELS[_PPI_OPTIONS.index(self._ppi)]
+        self._ppi_seg = ctk.CTkSegmentedButton(
+            content,
+            values=_PPI_LABELS,
+            command=self._on_ppi_change,
+            font=_FONT_BODY,
+        )
+        self._ppi_seg.set(initial_label)
+        self._ppi_seg.grid(row=7, column=0, sticky="w", padx=PAD, pady=(0, PAD))
 
         # Separator
         ctk.CTkFrame(self, height=1, fg_color=_COLOR_BORDER, corner_radius=0).grid(
@@ -268,13 +423,34 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _register_drop_target(self) -> None:
-        """Register the whole window as a DnD drop target for files."""
-        self.drop_target_register(DND_FILES)
-        self.dnd_bind("<<Drop>>", self._on_drop)
+        """Register the whole window as a DnD drop target for files.
 
-    def _on_drop(self, event) -> None:
-        """Handle a file dropped onto the window."""
-        raw = event.data.strip()
+        ctk.CTk does not inherit from tkinter.BaseWidget, so we cannot use
+        the DnDWrapper helper methods — call the Tcl tkdnd commands directly.
+
+        tkdnd requires <<DropEnter>> and <<DropPosition>> handlers to return
+        an action string ("copy") before it will ever fire <<Drop>>.
+        """
+        self.tk.call("tkdnd::drop_target", "register", self._w, (DND_FILES,))
+
+        # tkdnd evaluates the binding script and substitutes ALL percent fields
+        # (%A %a %b … %Y) before calling the registered command.  If the command
+        # is registered with no arguments Tcl raises an error and the drop is
+        # silently aborted.  Pass the full substitution string so every field is
+        # forwarded as a positional argument; the lambdas accept *_ to discard them.
+        _subst = "%A %a %b %C %c {%CST} {%CTT} %D %e {%L} {%m} {%ST} %T {%t} {%TT} %W %X %Y"
+
+        accept_cb = self.register(lambda *_: "copy")
+        drop_cb = self.register(self._on_drop_data)
+
+        self.tk.call("bind", self._w, "<<DropEnter>>", f"{accept_cb} {_subst}")
+        self.tk.call("bind", self._w, "<<DropPosition>>", f"{accept_cb} {_subst}")
+        self.tk.call("bind", self._w, "<<Drop>>", f"{drop_cb} {_subst}")
+
+    def _on_drop_data(self, _A, _a, _b, _C, _c, _CST, _CTT,
+                      data: str, *_rest) -> None:
+        """Handle a <<Drop>> event.  ``data`` is the %D substitution (file path)."""
+        raw = data.strip()
         # tkinterdnd2 wraps paths with spaces in braces: {/path/to file.pptx}
         if raw.startswith("{") and raw.endswith("}"):
             raw = raw[1:-1]
@@ -328,7 +504,7 @@ class App(ctk.CTk):
             default_out = str(p.parent / f"{p.stem}_pngs")
             self._output_dir = default_out
             self._out_var.set(default_out)
-        self._file_card.show_file(p)
+        self._file_card.show_file(p, ppi=self._ppi)
         logger.debug("Selected pptx: %s", path)
         self._update_run_button_state()
 
@@ -338,7 +514,16 @@ class App(ctk.CTk):
             self._output_dir = path
             self._out_var.set(path)
             logger.debug("Selected output dir: %s", path)
+            _save_settings({"ppi": self._ppi, "output_dir": path})
             self._update_run_button_state()
+
+    def _on_ppi_change(self, label: str) -> None:
+        idx = _PPI_LABELS.index(label)
+        self._ppi = _PPI_OPTIONS[idx]
+        logger.debug("PPI set to %d", self._ppi)
+        _save_settings({"ppi": self._ppi, "output_dir": self._output_dir})
+        if self._pptx_path:
+            self._file_card.show_file(Path(self._pptx_path), ppi=self._ppi)
 
     def _on_run(self) -> None:
         if not self._pptx_path or not self._output_dir:
@@ -376,6 +561,7 @@ class App(ctk.CTk):
                 self._output_dir,
                 progress_callback=self._on_progress,
                 cancel_event=self._cancel_event,
+                ppi=self._ppi,
             )
             self.after(0, self._on_export_done)
         except InterruptedError:
@@ -450,7 +636,7 @@ class App(ctk.CTk):
 class _FileCard(ctk.CTkFrame):
     """Shows either a drop-prompt or a file summary card."""
 
-    def __init__(self, parent, on_browse, on_clear):
+    def __init__(self, parent, on_browse, on_clear, dnd_available: bool = False):
         super().__init__(
             parent,
             fg_color=_COLOR_BG_SURFACE,
@@ -461,6 +647,7 @@ class _FileCard(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self._on_browse = on_browse
         self._on_clear = on_clear
+        self._dnd_available = dnd_available
         self._build_empty()
         self._empty_visible = True
 
@@ -471,16 +658,22 @@ class _FileCard(ctk.CTkFrame):
         self._empty_frame.grid(row=0, column=0, sticky="ew")
         self._empty_frame.grid_columnconfigure(0, weight=1)
 
+        headline = "Drop a .pptx file here" if self._dnd_available else "No file selected"
+        subline = (
+            "or click Browse to open a file" if self._dnd_available
+            else "Click Browse to open a .pptx file"
+        )
+
         ctk.CTkLabel(
             self._empty_frame,
-            text="Drop a .pptx file here",
+            text=headline,
             font=_FONT_BODY_BOLD,
             text_color=_COLOR_TEXT_PRIMARY,
         ).grid(row=0, column=0, pady=(16, 2))
 
         ctk.CTkLabel(
             self._empty_frame,
-            text="or click Browse to open a file",
+            text=subline,
             font=_FONT_SMALL,
             text_color=_COLOR_TEXT_SECONDARY,
         ).grid(row=1, column=0, pady=(0, 12))
@@ -543,28 +736,28 @@ class _FileCard(ctk.CTkFrame):
         self._empty_frame.grid()
         self._empty_visible = True
 
-    def show_file(self, path: Path) -> None:
+    def show_file(self, path: Path, ppi: int = 300) -> None:
         self._empty_frame.grid_remove()
         if not hasattr(self, "_file_frame"):
             self._build_file()
         self._filename_label.configure(text=path.name)
-        self._meta_label.configure(text=self._read_meta(path))
+        self._meta_label.configure(text=self._read_meta(path, ppi))
         self._file_frame.grid()
         self._empty_visible = False
 
     @staticmethod
-    def _read_meta(path: Path) -> str:
+    def _read_meta(path: Path, ppi: int = 300) -> str:
         try:
             from pptx import Presentation
             prs = Presentation(str(path))
             n = len(prs.slides)
             w_pt = prs.slide_width / 12700
             h_pt = prs.slide_height / 12700
-            w_px = int(round(w_pt / 72 * 300))
-            h_px = int(round(h_pt / 72 * 300))
+            w_px = int(round(w_pt / 72 * ppi))
+            h_px = int(round(h_pt / 72 * ppi))
             size_mb = path.stat().st_size / 1_048_576
             slides = f"{n} slide{'s' if n != 1 else ''}"
-            return f"{slides}  ·  {size_mb:.1f} MB  ·  {w_px} × {h_px} px @ 300 dpi"
+            return f"{slides}  ·  {size_mb:.1f} MB  ·  {w_px} × {h_px} px @ {ppi} dpi"
         except Exception:
             size_mb = path.stat().st_size / 1_048_576
             return f"{size_mb:.1f} MB"

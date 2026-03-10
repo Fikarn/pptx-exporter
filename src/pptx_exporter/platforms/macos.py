@@ -161,6 +161,7 @@ def export_slides(
     output_dir: Path,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     cancel_event: Optional[threading.Event] = None,
+    ppi: int = 300,
 ) -> None:
     """Export every slide of *pptx_path* as a transparent PNG into *output_dir*.
 
@@ -178,8 +179,8 @@ def export_slides(
     total = len(prs.slides)
     slide_w = round(prs.slide_width / 12700, 1)   # EMU → points
     slide_h = round(prs.slide_height / 12700, 1)   # EMU → points
-    # Target pixel dimensions for 300 PPI output (points are 1/72 inch).
-    target_ppi = 300
+    # Target pixel dimensions at the requested PPI (points are 1/72 inch).
+    target_ppi = ppi
     target_w = int(round(slide_w / 72 * target_ppi))
     target_h = int(round(slide_h / 72 * target_ppi))
     logger.info("Slide count: %d, dimensions: %.0f x %.0f pts, target: %d x %d px (%d PPI)",

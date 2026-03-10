@@ -31,6 +31,7 @@ def export_slides(
     output_dir: Path,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     cancel_event: Optional[threading.Event] = None,
+    ppi: int = 300,
 ) -> None:
     """Export every slide of *pptx_path* as a transparent PNG into *output_dir*.
 
