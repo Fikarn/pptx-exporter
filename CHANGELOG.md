@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-10
+
+### Added
+- Modern GUI redesign built on CustomTkinter with system light/dark mode support.
+- Drag-and-drop infrastructure (tkdnd 2.9.5 vendored binary built for Tcl/Tk 9.0).
+- Cancel button: cleanly aborts an in-progress export between slides.
+- Open Folder button: appears after a successful export to reveal the output directory.
+- File metadata card: shows slide count, file size, and output pixel dimensions after selecting a file.
+- Configurable export resolution: 72 / 150 / 300 dpi segmented control (default 300).
+- Settings persistence: selected resolution and last-used output folder are saved across sessions (`~/.pptx-exporter-settings.json`).
+- Smart default output path: automatically suggests `{filename}_pngs/` next to the source file.
+- Inline error banner replacing disruptive modal dialogs.
+- Backend status pill in the header (green = PowerPoint ready, red = not found).
+
 ## [0.2.0] - 2026-03-10
 
 ### Changed
@@ -35,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Fikarn/pptx-exporter/releases/tag/v0.1.0

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pptx-exporter"
-version = "0.2.0"
+version = "1.0.0"
 description = "Export PowerPoint slide objects as transparent PNG images"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -12,7 +12,7 @@ authors = [{ name = "Fikarn" }]
 requires-python = ">=3.10"
 keywords = ["powerpoint", "pptx", "export", "png", "transparent"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: MacOS X",
     "Environment :: Win32 (MS Windows)",
     "Intended Audience :: End Users/Desktop",
