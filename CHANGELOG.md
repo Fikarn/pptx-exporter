@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-10
+
+### Fixed
+- Release workflow: Windows build failure no longer blocks the macOS release from publishing.
+- README: corrected usage instructions, resolution options, and binary availability.
+
 ## [1.0.0] - 2026-03-10
 
 ### Added
@@ -49,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Fikarn/pptx-exporter/releases/tag/v0.1.0
