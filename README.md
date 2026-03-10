@@ -20,9 +20,9 @@ For every slide the app:
 
 1. Opens the original `.pptx` file in Microsoft PowerPoint.
 2. Navigates to the slide and adds an invisible, borderless rectangle exactly the size of the slide — a bounding anchor so the exported PNG always has the full slide dimensions.
-3. Selects all objects (Cmd+A) and copies to the clipboard (Cmd+C).
+3. Selects all objects (Cmd+A / Ctrl+A) and copies to the clipboard.
 4. Reads the clipboard image — preferring PDF vector data for maximum fidelity, falling back to TIFF or PNG.
-5. Renders the clipboard data into a bitmap at the selected resolution (72 / 150 / 300 dpi) and saves it as a transparent PNG (`slide_01.png`, `slide_02.png`, …).
+5. Renders the clipboard data at the chosen resolution (72 / 150 / 300 dpi) and saves it as a transparent PNG (`slide_01.png`, `slide_02.png`, …).
 6. Closes the presentation without saving — the original file is never modified.
 
 ---
@@ -31,22 +31,18 @@ For every slide the app:
 
 Microsoft PowerPoint must be installed. The app detects PowerPoint at startup and disables the export button if it is not found.
 
-| OS | Backend | Status |
+| OS | Backend | Pre-built binary |
 |---|---|---|
-| macOS | AppleScript automation | Working |
-| Windows | COM automation (pywin32) | Working (no pre-built binary yet) |
+| macOS | AppleScript automation | ✅ Available |
+| Windows | COM automation (pywin32) | 🚧 Coming soon |
 
 ---
 
-## Download
+## Download (macOS)
 
-Pre-built binaries are on the [GitHub Releases page](https://github.com/Fikarn/pptx-exporter/releases):
+Download the latest `pptx-exporter-macos-vX.Y.Z.zip` from the [Releases page](https://github.com/Fikarn/pptx-exporter/releases), unzip, and open `pptx-exporter.app`.
 
-- **macOS:** Download `pptx-exporter-macos-vX.Y.Z.zip`, unzip, and open `pptx-exporter.app`.
-
-> **Windows binary:** Not yet available as a pre-built download. Windows users can run from source (see below).
-
-### macOS — bypassing Gatekeeper
+### Bypassing Gatekeeper
 
 Because the app is unsigned, macOS may silently block it. The most reliable fix is to remove the quarantine flag in Terminal after unzipping:
 
@@ -54,20 +50,16 @@ Because the app is unsigned, macOS may silently block it. The most reliable fix 
 xattr -dr com.apple.quarantine /path/to/pptx-exporter.app
 ```
 
-Then double-click to open normally. Alternatively:
-
-1. Right-click (or Control-click) `pptx-exporter.app` in Finder.
-2. Select **Open**.
-3. Click **Open** in the dialog that appears.
+Then double-click to open normally. Alternatively, right-click → **Open** → **Open**.
 
 ---
 
 ## Usage
 
 1. Launch the app.
-2. **Select a file** — click **Browse…** in the Input File card, or drag and drop a `.pptx` file onto the window.
+2. **Select a file** — click **Browse…** in the Input File card to pick a `.pptx` file.
 3. **Choose an output folder** — a default (`{filename}_pngs/` next to the source file) is suggested automatically; click **Browse…** to change it.
-4. **Pick a resolution** — select 72, 150, or 300 dpi using the segmented control (default: 300 dpi).
+4. **Pick a resolution** — choose 72, 150, or 300 dpi using the segmented control (default: 300 dpi).
 5. Click **Export PNGs**.
 6. A progress bar tracks each slide. Click **Cancel** at any time to stop cleanly after the current slide finishes.
 7. When done, click **Open Folder ↗** to reveal the exported PNGs.
@@ -114,18 +106,16 @@ flake8 src/ tests/
 
 ### Build a standalone binary
 
-**macOS:**
+**macOS** — produces `dist/mac/pptx-exporter.app`:
 
 ```bash
 bash build/build_mac.sh
-# Output: dist/mac/pptx-exporter.app
 ```
 
-**Windows:**
+**Windows** — produces `dist\windows\pptx-exporter.exe`:
 
 ```bat
 build\build_windows.bat
-REM Output: dist\windows\pptx-exporter.exe
 ```
 
 ### Configure log level
@@ -141,7 +131,7 @@ Valid values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (default: `INFO`).
 ## CI/CD
 
 - **CI** runs on every push and pull request to `main`: installs dependencies, runs `pytest`, and runs `flake8`.
-- **Release** is triggered by pushing a version tag (e.g. `v1.0.0`): runs tests, builds macOS `.app`, then creates a GitHub Release with the archive attached.
+- **Release** is triggered by pushing a version tag (e.g. `v1.0.3`): runs tests, builds the macOS `.app`, and creates a GitHub Release with the archive attached. The Windows build runs in parallel but does not block the release if it fails.
 
 To publish a new release:
 
