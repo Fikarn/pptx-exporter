@@ -192,7 +192,9 @@ class App(ctk.CTk):
         settings = _load_settings()
         self._ppi: int = settings.get("ppi", 300)
         saved_out = settings.get("output_dir")
-        self._output_dir: Optional[str] = saved_out if saved_out and os.path.isdir(saved_out) else None
+        self._output_dir: Optional[str] = (
+            saved_out if saved_out and os.path.isdir(saved_out) else None
+        )
 
         self._build_ui()
         self._update_run_button_state()
