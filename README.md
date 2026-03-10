@@ -48,13 +48,17 @@ Pre-built binaries are on the [GitHub Releases page](https://github.com/Fikarn/p
 
 ### macOS — bypassing Gatekeeper
 
-Because the app is unsigned, macOS Gatekeeper will block it on first launch:
+Because the app is unsigned, macOS may silently block it. The most reliable fix is to remove the quarantine flag in Terminal after unzipping:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/pptx-exporter.app
+```
+
+Then double-click to open normally. Alternatively:
 
 1. Right-click (or Control-click) `pptx-exporter.app` in Finder.
 2. Select **Open**.
 3. Click **Open** in the dialog that appears.
-
-You only need to do this once.
 
 ---
 

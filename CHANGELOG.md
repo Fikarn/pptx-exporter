@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-03-10
+
+### Fixed
+- macOS build: use `--collect-all` for customtkinter and darkdetect to ensure
+  theme assets are fully included; add hidden imports for lxml and platform
+  backends so PyInstaller does not miss dynamically imported modules.
+- macOS build: strip Gatekeeper quarantine flag from the .app bundle during
+  build so downloaded apps open without being silently blocked.
+- README: document the `xattr` quarantine workaround for macOS users.
+
 ## [1.0.1] - 2026-03-10
 
 ### Fixed
@@ -55,7 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/Fikarn/pptx-exporter/compare/v0.1.0...v0.2.0
