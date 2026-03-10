@@ -8,6 +8,7 @@ Per-slide workflow (mirrors manual user actions):
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -29,6 +30,7 @@ def export_slides(
     pptx_path: Path,
     output_dir: Path,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     """Export every slide of *pptx_path* as a transparent PNG into *output_dir*.
 
@@ -72,6 +74,10 @@ def export_slides(
         )
 
         for idx in range(total):
+            if cancel_event and cancel_event.is_set():
+                logger.info("Export cancelled before slide %d", idx + 1)
+                raise InterruptedError("Export cancelled by user.")
+
             slide_num = idx + 1
             if progress_callback:
                 progress_callback(idx, total)

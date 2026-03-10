@@ -86,8 +86,10 @@ def test_export_dispatches_to_macos_backend(fake_pptx: Path, out_dir: Path) -> N
     with mock.patch(
         "pptx_exporter.platforms.macos.export_slides"
     ) as mock_export:
-        exp._export_macos(fake_pptx, out_dir, None)
-        mock_export.assert_called_once_with(fake_pptx, out_dir, progress_callback=None)
+        exp._export_macos(fake_pptx, out_dir, None, None)
+        mock_export.assert_called_once_with(
+            fake_pptx, out_dir, progress_callback=None, cancel_event=None
+        )
 
 
 def test_export_dispatches_to_windows_backend(fake_pptx: Path, out_dir: Path) -> None:
@@ -98,8 +100,10 @@ def test_export_dispatches_to_windows_backend(fake_pptx: Path, out_dir: Path) ->
     with mock.patch(
         "pptx_exporter.platforms.windows.export_slides"
     ) as mock_export:
-        exp._export_windows(fake_pptx, out_dir, None)
-        mock_export.assert_called_once_with(fake_pptx, out_dir, progress_callback=None)
+        exp._export_windows(fake_pptx, out_dir, None, None)
+        mock_export.assert_called_once_with(
+            fake_pptx, out_dir, progress_callback=None, cancel_event=None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -121,14 +125,14 @@ def test_export_calls_progress_callback(fake_pptx: Path, out_dir: Path) -> None:
     with mock.patch(
         "pptx_exporter.platforms.macos.export_slides"
     ) as mock_export:
-        def side_effect(path, out, progress_callback=None):
+        def side_effect(path, out, progress_callback=None, cancel_event=None):
             if progress_callback:
                 progress_callback(0, 3)
                 progress_callback(1, 3)
                 progress_callback(3, 3)
 
         mock_export.side_effect = side_effect
-        exp._export_macos(fake_pptx, out_dir, cb)
+        exp._export_macos(fake_pptx, out_dir, cb, None)
 
     assert calls == [(0, 3), (1, 3), (3, 3)]
 

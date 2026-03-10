@@ -18,6 +18,7 @@ objects.
 
 import logging
 import subprocess
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -159,12 +160,17 @@ def export_slides(
     pptx_path: Path,
     output_dir: Path,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     """Export every slide of *pptx_path* as a transparent PNG into *output_dir*.
 
     Opens the original file in PowerPoint. For each slide: adds an invisible
     bounding rectangle, selects all, copies to clipboard, and saves the
     clipboard PNG via NSPasteboard. Closes without saving.
+
+    Args:
+        cancel_event: Optional threading.Event; if set between slides the
+            export is aborted cleanly and the presentation is closed.
     """
     # Read slide metadata via python-pptx (no modification).
     from pptx import Presentation
@@ -188,6 +194,10 @@ def export_slides(
 
     try:
         for idx in range(total):
+            if cancel_event and cancel_event.is_set():
+                logger.info("Export cancelled before slide %d", idx + 1)
+                raise InterruptedError("Export cancelled by user.")
+
             slide_num = idx + 1
             if progress_callback:
                 progress_callback(idx, total)

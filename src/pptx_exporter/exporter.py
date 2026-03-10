@@ -5,6 +5,7 @@ export to the appropriate platform module.
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -40,6 +41,7 @@ class Exporter:
         pptx_path: str,
         output_dir: str,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> None:
         """Validate inputs and run the export.
 
@@ -49,10 +51,13 @@ class Exporter:
             progress_callback: Optional callable(current_slide_index, total_slides)
                 called before each slide is processed, and once more at
                 completion with current_slide_index == total_slides.
+            cancel_event: Optional threading.Event; when set the export is
+                aborted cleanly between slides and InterruptedError is raised.
 
         Raises:
             ValueError: If *pptx_path* or *output_dir* are invalid.
             RuntimeError: If the underlying backend fails.
+            InterruptedError: If *cancel_event* is set during the export.
         """
         pptx = validate_pptx(pptx_path)
         out = validate_output_dir(output_dir)
@@ -71,9 +76,9 @@ class Exporter:
             )
 
         if self.backend == "macos":
-            self._export_macos(pptx, out, progress_callback)
+            self._export_macos(pptx, out, progress_callback, cancel_event)
         elif self.backend == "windows":
-            self._export_windows(pptx, out, progress_callback)
+            self._export_windows(pptx, out, progress_callback, cancel_event)
 
         logger.info("Export complete → %s", out)
 
@@ -86,17 +91,21 @@ class Exporter:
         pptx: Path,
         out: Path,
         progress_callback: Optional[Callable[[int, int], None]],
+        cancel_event: Optional[threading.Event],
     ) -> None:
         from .platforms.macos import export_slides
 
-        export_slides(pptx, out, progress_callback=progress_callback)
+        export_slides(pptx, out, progress_callback=progress_callback,
+                      cancel_event=cancel_event)
 
     def _export_windows(
         self,
         pptx: Path,
         out: Path,
         progress_callback: Optional[Callable[[int, int], None]],
+        cancel_event: Optional[threading.Event],
     ) -> None:
         from .platforms.windows import export_slides
 
-        export_slides(pptx, out, progress_callback=progress_callback)
+        export_slides(pptx, out, progress_callback=progress_callback,
+                      cancel_event=cancel_event)
