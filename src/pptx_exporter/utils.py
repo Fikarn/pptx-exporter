@@ -58,6 +58,43 @@ def slide_output_name(slide_index: int, total: int) -> str:
     return f"slide_{slide_index + 1:0{width}d}.png"
 
 
+def parse_slide_range(spec: str, total: int) -> list[int]:
+    """Parse a slide range specification into a sorted list of 0-based indices.
+
+    Accepts comma-separated values and ranges, e.g. ``"1-5, 8, 10-12"``.
+    Slide numbers are 1-based in the input; returns 0-based indices.
+    Out-of-range values are silently clamped to ``[1, total]``.
+
+    Raises :class:`ValueError` if *spec* is empty or contains no valid numbers.
+    """
+    indices: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            bounds = part.split("-", 1)
+            try:
+                lo = max(1, int(bounds[0].strip()))
+                hi = min(total, int(bounds[1].strip()))
+            except ValueError:
+                continue
+            indices.update(range(lo - 1, hi))
+        else:
+            try:
+                num = int(part)
+            except ValueError:
+                continue
+            if 1 <= num <= total:
+                indices.add(num - 1)
+    if not indices:
+        raise ValueError(
+            f"No valid slides in range '{spec}'. "
+            f"Enter slide numbers between 1 and {total}."
+        )
+    return sorted(indices)
+
+
 def detect_os() -> str:
     """Return 'macos', 'windows', or 'other'."""
     system = platform.system()

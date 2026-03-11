@@ -20,7 +20,7 @@ import logging
 import subprocess
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from ..utils import slide_output_name
 
@@ -34,7 +34,14 @@ _SCRIPT_OPEN = """\
 tell application "Microsoft PowerPoint"
     activate
     open POSIX file "{pptx_path}"
-    delay 2
+    -- Poll until the presentation is fully loaded (up to 15 s).
+    repeat 30 times
+        try
+            if (count of slides of active presentation) > 0 then return "ready"
+        end try
+        delay 0.5
+    end repeat
+    return "timeout"
 end tell
 """
 
@@ -43,7 +50,14 @@ tell application "Microsoft PowerPoint"
     activate
     set theView to view of active window
     set slide of theView to slide {slide_num} of active presentation
-    delay 0.5
+    -- Poll until navigation completes (up to 5 s).
+    repeat 20 times
+        try
+            if (slide number of slide of theView) = {slide_num} then return "ready"
+        end try
+        delay 0.25
+    end repeat
+    return "timeout"
 end tell
 """
 
@@ -134,19 +148,60 @@ end tell
 """
 
 
+def _check_accessibility() -> None:
+    """Raise RuntimeError if the app lacks Accessibility (System Events) access.
+
+    The export relies on System Events keystrokes (Esc, Cmd+A, Cmd+C).
+    Without Accessibility permission these silently fail, producing empty
+    clipboard reads for every slide.
+    """
+    script = (
+        'use framework "ApplicationServices"\n'
+        "return (current application's AXIsProcessTrusted()) as boolean"
+    )
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, check=False,
+        )
+        if result.stdout.strip() == "false":
+            raise RuntimeError(
+                "Accessibility access is required.\n"
+                "Go to System Settings → Privacy & Security → Accessibility "
+                "and enable access for this app, then try again."
+            )
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        # If the check itself fails, log and continue — don't block the
+        # export on an optional pre-flight check.
+        logger.debug("Accessibility pre-check failed: %s", exc)
+
+
 def _escape_applescript_string(s: str) -> str:
     """Escape a string for safe embedding in AppleScript double-quoted literals."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _run_applescript(script: str) -> str:
-    """Execute *script* via osascript and return stdout stripped."""
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def _run_applescript(script: str, timeout: int = 30) -> str:
+    """Execute *script* via osascript and return stdout stripped.
+
+    Args:
+        timeout: Maximum seconds to wait before killing the process.
+    """
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"AppleScript timed out after {timeout}s. "
+            "PowerPoint may be unresponsive — try restarting it."
+        )
     if result.returncode != 0:
         raise RuntimeError(
             f"AppleScript error (exit {result.returncode}):\n"
@@ -162,6 +217,7 @@ def export_slides(
     progress_callback: Optional[Callable[[int, int], None]] = None,
     cancel_event: Optional[threading.Event] = None,
     ppi: int = 300,
+    slide_indices: Optional[Sequence[int]] = None,
 ) -> None:
     """Export every slide of *pptx_path* as a transparent PNG into *output_dir*.
 
@@ -173,6 +229,8 @@ def export_slides(
         cancel_event: Optional threading.Event; if set between slides the
             export is aborted cleanly and the presentation is closed.
     """
+    _check_accessibility()
+
     # Read slide metadata via python-pptx (no modification).
     from pptx import Presentation
     prs = Presentation(str(pptx_path))
@@ -189,19 +247,26 @@ def export_slides(
     # Open the original file in PowerPoint.
     pptx_posix = str(pptx_path)
     logger.info("Opening presentation in PowerPoint: %s", pptx_posix)
-    _run_applescript(_SCRIPT_OPEN.format(
+    open_result = _run_applescript(_SCRIPT_OPEN.format(
         pptx_path=_escape_applescript_string(pptx_posix)
-    ))
+    ), timeout=60)
+    if open_result == "timeout":
+        raise RuntimeError(
+            "Timed out waiting for PowerPoint to open the presentation. "
+            "Try closing other presentations and retrying."
+        )
 
     try:
-        for idx in range(total):
+        indices = list(slide_indices) if slide_indices is not None else list(range(total))
+        selected_total = len(indices)
+        for progress_idx, idx in enumerate(indices):
             if cancel_event and cancel_event.is_set():
                 logger.info("Export cancelled before slide %d", idx + 1)
                 raise InterruptedError("Export cancelled by user.")
 
             slide_num = idx + 1
             if progress_callback:
-                progress_callback(idx, total)
+                progress_callback(progress_idx, selected_total)
 
             logger.debug("Processing slide %d/%d", slide_num, total)
 
@@ -209,9 +274,11 @@ def export_slides(
             out_path = output_dir / out_name
 
             # Step 1: Navigate to the slide.
-            _run_applescript(
+            nav_result = _run_applescript(
                 _SCRIPT_GO_TO_SLIDE.format(slide_num=slide_num)
             )
+            if nav_result == "timeout":
+                logger.warning("Slide %d: navigation timed out, proceeding anyway", slide_num)
 
             # Step 2: Add invisible full-slide bounding rectangle.
             _run_applescript(
@@ -222,22 +289,33 @@ def export_slides(
                 )
             )
 
-            # Step 3: Select all shapes and copy to clipboard.
-            _run_applescript(_SCRIPT_SELECT_ALL_AND_COPY)
-
-            # Step 4: Save clipboard as high-resolution PNG.
-            save_result = _run_applescript(
-                _SCRIPT_CLIPBOARD_TO_PNG.format(
-                    out_path=_escape_applescript_string(str(out_path)),
-                    target_w=target_w,
-                    target_h=target_h,
+            # Step 3+4: Select all, copy, and save clipboard as PNG.
+            # Retry up to 3 times — the clipboard may not be ready on the
+            # first attempt due to timing between the copy and the read.
+            max_attempts = 3
+            save_result = "no_image"
+            for attempt in range(1, max_attempts + 1):
+                _run_applescript(_SCRIPT_SELECT_ALL_AND_COPY)
+                save_result = _run_applescript(
+                    _SCRIPT_CLIPBOARD_TO_PNG.format(
+                        out_path=_escape_applescript_string(str(out_path)),
+                        target_w=target_w,
+                        target_h=target_h,
+                    )
                 )
-            )
+                if save_result == "ok":
+                    break
+                if attempt < max_attempts:
+                    logger.debug(
+                        "Slide %d: clipboard attempt %d/%d returned '%s', retrying",
+                        slide_num, attempt, max_attempts, save_result,
+                    )
 
             if save_result == "ok":
                 logger.info("Exported slide %d → %s", slide_num, out_path)
             elif save_result == "no_image":
-                logger.warning("Slide %d: no image data on clipboard", slide_num)
+                logger.warning("Slide %d: no image data on clipboard after %d attempts",
+                               slide_num, max_attempts)
             else:
                 logger.warning("Slide %d: clipboard save returned '%s'", slide_num, save_result)
 
@@ -249,4 +327,4 @@ def export_slides(
             logger.warning("Could not close presentation: %s", exc)
 
     if progress_callback:
-        progress_callback(total, total)
+        progress_callback(selected_total, selected_total)

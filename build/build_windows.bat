@@ -3,7 +3,7 @@ REM Build a single-file Windows .exe with PyInstaller.
 REM Output: dist\windows\pptx-exporter.exe
 
 pip install --upgrade pyinstaller
-pip install -e .
+pip install -e ".[windows]"
 
 pyinstaller ^
   --onefile ^
@@ -11,8 +11,6 @@ pyinstaller ^
   --name pptx-exporter ^
   --collect-all customtkinter ^
   --collect-all darkdetect ^
-  --collect-data tkinterdnd2 ^
-  --add-data "vendor;vendor" ^
   --hidden-import "pptx_exporter.platforms.macos" ^
   --hidden-import "pptx_exporter.platforms.windows" ^
   --hidden-import "lxml.etree" ^

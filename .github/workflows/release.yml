@@ -43,17 +43,16 @@ jobs:
       - name: Build macOS app
         run: bash build/build_mac.sh
 
-      - name: Zip .app bundle
+      - name: Rename DMG with version
         run: |
           VERSION="${{ github.ref_name }}"
-          cd dist/mac
-          zip -r "../../pptx-exporter-macos-${VERSION}.zip" pptx-exporter.app
+          mv dist/mac/pptx-exporter.dmg "pptx-exporter-macos-${VERSION}.dmg"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: "pptx-exporter-macos-${{ github.ref_name }}.zip"
+          path: "pptx-exporter-macos-${{ github.ref_name }}.dmg"
           retention-days: 1
 
   # ── 2b. Windows build (best-effort) ───────────────────────────────────────
@@ -126,7 +125,7 @@ jobs:
           name: ${{ github.ref_name }}
           body_path: release_body.md
           files: |
-            pptx-exporter-macos-${{ github.ref_name }}.zip
+            pptx-exporter-macos-${{ github.ref_name }}.dmg
             pptx-exporter-windows-${{ github.ref_name }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

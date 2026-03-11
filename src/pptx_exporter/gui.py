@@ -8,19 +8,13 @@ import sys
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 from typing import Optional
 
 import customtkinter as ctk
 
-try:
-    from tkinterdnd2 import DND_FILES, TkinterDnD
-    _DND_AVAILABLE = True
-except Exception:
-    _DND_AVAILABLE = False
-
 from .exporter import Exporter
-from .utils import configure_logging
+from .utils import configure_logging, parse_slide_range
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +48,14 @@ _FONT_BODY_BOLD = ("system-ui", 13, "bold")
 _FONT_SMALL = ("system-ui", 11)
 _FONT_TITLE = ("system-ui", 15, "bold")
 
-_PPI_OPTIONS = [72, 150, 300]
-_PPI_LABELS = ["72 dpi", "150 dpi", "300 dpi"]
+_PPI_PRESETS = {
+    "72 dpi": 72,
+    "150 dpi": 150,
+    "300 dpi": 300,
+}
+_PPI_SEGMENT_VALUES = ["72 dpi", "150 dpi", "300 dpi", "Custom"]
+_PPI_MIN = 36
+_PPI_MAX = 2400
 
 # ---------------------------------------------------------------------------
 # Settings persistence (~/.pptx-exporter-settings.json)
@@ -80,104 +80,11 @@ def _save_settings(data: dict) -> None:
         logger.debug("Could not save settings: %s", exc)
 
 
-def _load_tkdnd(tkroot) -> bool:
-    """Load the tkdnd extension, with a Tcl 9 compatibility fallback.
-
-    tkinterdnd2 bundles a tkdnd binary compiled for Tcl 8.  On Tcl 9 the
-    standard ``_require`` call fails.  This function pre-installs a
-    Tcl-9-compatible binary from ``vendor/tkdnd/<platform>/`` (shipped with
-    this repo) and patches the tkinterdnd2 package directory in-place *before*
-    any load attempt, so only the correct binary is ever loaded.
-    """
-    if not _DND_AVAILABLE:
-        return False
-
-    import os
-    import platform as _platform
-
-    system = _platform.system()
-    machine = _platform.machine()
-    platform_map = {
-        ("Darwin", "arm64"): "osx-arm64",
-        ("Darwin", "x86_64"): "osx-x64",
-        ("Linux", "aarch64"): "linux-arm64",
-        ("Linux", "x86_64"): "linux-x64",
-    }
-    platform_dir = platform_map.get((system, machine))
-
-    if platform_dir:
-        # Check whether a vendored Tcl-9-compatible binary is available
-        here = os.path.dirname(os.path.abspath(__file__))
-        vendor_dir = os.path.normpath(
-            os.path.join(here, "..", "..", "vendor", "tkdnd", platform_dir)
-        )
-        exts = (".dylib", ".so", ".dll")
-        vendor_lib = next(
-            (f for f in os.listdir(vendor_dir)
-             if f.startswith("libtkdnd") and f.endswith(exts)),
-            None,
-        ) if os.path.isdir(vendor_dir) else None
-
-        if vendor_lib:
-            try:
-                import shutil
-                import tkinterdnd2
-
-                mod_dir = os.path.join(
-                    os.path.dirname(tkinterdnd2.__file__), "tkdnd", platform_dir
-                )
-                dest_lib = os.path.join(mod_dir, vendor_lib)
-
-                # Install binary if not already present
-                if not os.path.exists(dest_lib):
-                    shutil.copy2(os.path.join(vendor_dir, vendor_lib), dest_lib)
-                    logger.debug("Installed vendored %s", vendor_lib)
-
-                # Patch pkgIndex.tcl to point at the new binary (once only)
-                pkg_index = os.path.join(mod_dir, "pkgIndex.tcl")
-                with open(pkg_index) as fh:
-                    content = fh.read()
-                version = (vendor_lib
-                           .replace("libtkdnd", "")
-                           .replace(".dylib", "")
-                           .replace(".so", ""))
-                old_lib = next(
-                    (f for f in os.listdir(mod_dir)
-                     if f.startswith("libtkdnd") and f.endswith(exts)
-                     and f != vendor_lib),
-                    None,
-                )
-                if old_lib and old_lib in content:
-                    old_ver = (old_lib
-                               .replace("libtkdnd", "")
-                               .replace(".dylib", "")
-                               .replace(".so", ""))
-                    content = content.replace(f"{old_lib} tkdnd", f"{vendor_lib} Tkdnd")
-                    content = content.replace(f"tkdnd {old_ver}", f"tkdnd {version}")
-                    with open(pkg_index, "w") as fh:
-                        fh.write(content)
-                    logger.debug("Patched pkgIndex.tcl → tkdnd %s", version)
-
-            except Exception as exc:
-                logger.debug("tkdnd vendor setup failed: %s", exc)
-
-    # Standard load — now works whether the binary was already compatible
-    # or was just installed/patched above
-    try:
-        TkinterDnD._require(tkroot)
-        return True
-    except Exception as exc:
-        logger.debug("tkdnd load failed: %s", exc)
-        return False
-
-
 class App(ctk.CTk):
     """Main application window."""
 
     def __init__(self) -> None:
         super().__init__()
-        self._dnd_loaded = _load_tkdnd(self)
-
         configure_logging()
 
         self.title("pptx-exporter")
@@ -185,7 +92,7 @@ class App(ctk.CTk):
         self.minsize(520, 0)
 
         self._exporter = Exporter()
-        self._pptx_path: Optional[str] = None
+        self._pptx_paths: list[str] = []
         self._powerpoint_available = self._exporter.backend != "not_found"
         self._cancel_event: Optional[threading.Event] = None
 
@@ -198,12 +105,6 @@ class App(ctk.CTk):
 
         self._build_ui()
         self._update_run_button_state()
-        # Defer DnD registration until the first event-loop tick so that the
-        # native macOS NSWindow is fully realized before macdnd::registerdragwidget
-        # is called.  Calling it during __init__ (before mainloop) means
-        # _window_exists is still False and the C-level registration silently fails.
-        if self._dnd_loaded:
-            self.after(0, self._register_drop_target)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -259,13 +160,58 @@ class App(ctk.CTk):
 
         self._file_card = _FileCard(
             content, on_browse=self._browse_pptx, on_clear=self._clear_pptx,
-            dnd_available=self._dnd_loaded,
         )
         self._file_card.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
 
         # Separator
         ctk.CTkFrame(content, height=1, fg_color=_COLOR_BORDER, corner_radius=0).grid(
             row=2, column=0, sticky="ew", padx=PAD
+        )
+
+        # Slide selection section (hidden until a file is selected)
+        self._slides_frame = ctk.CTkFrame(content, fg_color="transparent")
+        self._slides_frame.grid(row=3, column=0, sticky="ew")
+        self._slides_frame.grid_columnconfigure(0, weight=1)
+        self._slides_frame.grid_remove()
+
+        ctk.CTkLabel(
+            self._slides_frame,
+            text="SLIDES",
+            font=_FONT_SMALL,
+            text_color=_COLOR_TEXT_SECONDARY,
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
+
+        slide_row = ctk.CTkFrame(self._slides_frame, fg_color="transparent")
+        slide_row.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, 4))
+        slide_row.grid_columnconfigure(1, weight=1)
+
+        self._all_slides_var = tk.BooleanVar(value=True)
+        self._all_slides_cb = ctk.CTkCheckBox(
+            slide_row,
+            text="All slides",
+            variable=self._all_slides_var,
+            command=self._on_slide_selection_toggle,
+            font=_FONT_BODY,
+        )
+        self._all_slides_cb.grid(row=0, column=0, sticky="w")
+
+        self._slide_range_entry = ctk.CTkEntry(
+            slide_row, font=_FONT_BODY,
+            placeholder_text="e.g. 1-5, 8, 10-12",
+        )
+        self._slide_range_entry.grid(row=0, column=1, sticky="ew", padx=(12, 0))
+        self._slide_range_entry.grid_remove()
+
+        # Separator after slides
+        ctk.CTkFrame(self._slides_frame, height=1, fg_color=_COLOR_BORDER,
+                     corner_radius=0).grid(
+            row=2, column=0, sticky="ew", padx=PAD, pady=(PAD, 0)
+        )
+
+        # Separator (when slides section is hidden)
+        self._sep_after_file = ctk.CTkFrame(
+            content, height=1, fg_color=_COLOR_BORDER, corner_radius=0
         )
 
         # Output folder section
@@ -275,10 +221,10 @@ class App(ctk.CTk):
             font=_FONT_SMALL,
             text_color=_COLOR_TEXT_SECONDARY,
             anchor="w",
-        ).grid(row=3, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
+        ).grid(row=4, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
 
         out_row = ctk.CTkFrame(content, fg_color="transparent")
-        out_row.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
+        out_row.grid(row=5, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
         out_row.grid_columnconfigure(0, weight=1)
 
         self._out_var = tk.StringVar(value=self._output_dir or "(none selected)")
@@ -305,7 +251,7 @@ class App(ctk.CTk):
 
         # Separator
         ctk.CTkFrame(content, height=1, fg_color=_COLOR_BORDER, corner_radius=0).grid(
-            row=5, column=0, sticky="ew", padx=PAD
+            row=6, column=0, sticky="ew", padx=PAD
         )
 
         # Resolution section
@@ -315,17 +261,46 @@ class App(ctk.CTk):
             font=_FONT_SMALL,
             text_color=_COLOR_TEXT_SECONDARY,
             anchor="w",
-        ).grid(row=6, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
+        ).grid(row=7, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
 
-        initial_label = _PPI_LABELS[_PPI_OPTIONS.index(self._ppi)]
+        # Determine initial segment selection.
+        initial_label = next(
+            (lbl for lbl, val in _PPI_PRESETS.items() if val == self._ppi),
+            "Custom",
+        )
         self._ppi_seg = ctk.CTkSegmentedButton(
             content,
-            values=_PPI_LABELS,
+            values=_PPI_SEGMENT_VALUES,
             command=self._on_ppi_change,
             font=_FONT_BODY,
         )
         self._ppi_seg.set(initial_label)
-        self._ppi_seg.grid(row=7, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+        self._ppi_seg.grid(row=8, column=0, sticky="w", padx=PAD, pady=(0, 4))
+
+        # Custom PPI entry (shown only when "Custom" is selected).
+        self._custom_ppi_frame = ctk.CTkFrame(content, fg_color="transparent")
+        self._custom_ppi_frame.grid(row=9, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+
+        self._custom_ppi_entry = ctk.CTkEntry(
+            self._custom_ppi_frame, width=80, font=_FONT_BODY,
+            placeholder_text="dpi",
+        )
+        self._custom_ppi_entry.grid(row=0, column=0)
+        self._custom_ppi_entry.bind("<Return>", lambda _: self._apply_custom_ppi())
+        self._custom_ppi_entry.bind("<FocusOut>", lambda _: self._apply_custom_ppi())
+
+        self._custom_ppi_hint = ctk.CTkLabel(
+            self._custom_ppi_frame,
+            text=f"  {_PPI_MIN}–{_PPI_MAX}",
+            font=_FONT_SMALL,
+            text_color=_COLOR_TEXT_SECONDARY,
+        )
+        self._custom_ppi_hint.grid(row=0, column=1)
+
+        if initial_label == "Custom":
+            self._custom_ppi_entry.insert(0, str(self._ppi))
+        else:
+            self._custom_ppi_frame.grid_remove()
 
         # Separator
         ctk.CTkFrame(self, height=1, fg_color=_COLOR_BORDER, corner_radius=0).grid(
@@ -421,49 +396,6 @@ class App(ctk.CTk):
         self.minsize(520, self.winfo_reqheight())
 
     # ------------------------------------------------------------------
-    # Drag-and-drop
-    # ------------------------------------------------------------------
-
-    def _register_drop_target(self) -> None:
-        """Register the whole window as a DnD drop target for files.
-
-        ctk.CTk does not inherit from tkinter.BaseWidget, so we cannot use
-        the DnDWrapper helper methods — call the Tcl tkdnd commands directly.
-
-        tkdnd requires <<DropEnter>> and <<DropPosition>> handlers to return
-        an action string ("copy") before it will ever fire <<Drop>>.
-        """
-        self.tk.call("tkdnd::drop_target", "register", self._w, (DND_FILES,))
-
-        # tkdnd evaluates the binding script and substitutes ALL percent fields
-        # (%A %a %b … %Y) before calling the registered command.  If the command
-        # is registered with no arguments Tcl raises an error and the drop is
-        # silently aborted.  Pass the full substitution string so every field is
-        # forwarded as a positional argument; the lambdas accept *_ to discard them.
-        _subst = "%A %a %b %C %c {%CST} {%CTT} %D %e {%L} {%m} {%ST} %T {%t} {%TT} %W %X %Y"
-
-        accept_cb = self.register(lambda *_: "copy")
-        drop_cb = self.register(self._on_drop_data)
-
-        self.tk.call("bind", self._w, "<<DropEnter>>", f"{accept_cb} {_subst}")
-        self.tk.call("bind", self._w, "<<DropPosition>>", f"{accept_cb} {_subst}")
-        self.tk.call("bind", self._w, "<<Drop>>", f"{drop_cb} {_subst}")
-
-    def _on_drop_data(self, _A, _a, _b, _C, _c, _CST, _CTT,
-                      data: str, *_rest) -> None:
-        """Handle a <<Drop>> event.  ``data`` is the %D substitution (file path)."""
-        raw = data.strip()
-        # tkinterdnd2 wraps paths with spaces in braces: {/path/to file.pptx}
-        if raw.startswith("{") and raw.endswith("}"):
-            raw = raw[1:-1]
-        # If multiple files were dropped, take only the first
-        path = raw.split("} {")[0].lstrip("{")
-        if path.lower().endswith(".pptx") and os.path.isfile(path):
-            self._set_pptx(path)
-        else:
-            logger.debug("Dropped file ignored (not a .pptx): %s", path)
-
-    # ------------------------------------------------------------------
     # Backend pill
     # ------------------------------------------------------------------
 
@@ -486,20 +418,26 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _browse_pptx(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Select PowerPoint file",
+        paths = filedialog.askopenfilenames(
+            title="Select PowerPoint file(s)",
             filetypes=[("PowerPoint files", "*.pptx"), ("All files", "*.*")],
         )
-        if path:
-            self._set_pptx(path)
+        if not paths:
+            return
+        if len(paths) == 1:
+            self._set_pptx(paths[0])
+        else:
+            self._set_pptx_batch(list(paths))
 
     def _clear_pptx(self) -> None:
-        self._pptx_path = None
+        self._pptx_paths = []
+        self._slide_count = 0
         self._file_card.show_empty()
+        self._slides_frame.grid_remove()
         self._update_run_button_state()
 
     def _set_pptx(self, path: str) -> None:
-        self._pptx_path = path
+        self._pptx_paths = [path]
         p = Path(path)
         # Set a smart output default: sibling folder named {stem}_pngs
         if self._output_dir is None:
@@ -507,8 +445,39 @@ class App(ctk.CTk):
             self._output_dir = default_out
             self._out_var.set(default_out)
         self._file_card.show_file(p, ppi=self._ppi)
+        # Read slide count and show the slides section.
+        try:
+            from pptx import Presentation
+            self._slide_count = len(Presentation(str(p)).slides)
+        except Exception:
+            self._slide_count = 0
+        if self._slide_count > 1:
+            self._slides_frame.grid()
+            self._all_slides_var.set(True)
+            self._slide_range_entry.grid_remove()
+        else:
+            self._slides_frame.grid_remove()
         logger.debug("Selected pptx: %s", path)
         self._update_run_button_state()
+
+    def _set_pptx_batch(self, paths: list[str]) -> None:
+        self._pptx_paths = paths
+        if self._output_dir is None:
+            default_out = str(Path(paths[0]).parent)
+            self._output_dir = default_out
+            self._out_var.set(default_out)
+        self._file_card.show_files(paths, ppi=self._ppi)
+        self._slide_count = 0
+        self._slides_frame.grid_remove()
+        logger.debug("Selected %d pptx files for batch export", len(paths))
+        self._update_run_button_state()
+
+    def _on_slide_selection_toggle(self) -> None:
+        if self._all_slides_var.get():
+            self._slide_range_entry.grid_remove()
+        else:
+            self._slide_range_entry.grid()
+            self._slide_range_entry.focus_set()
 
     def _browse_output(self) -> None:
         path = filedialog.askdirectory(title="Select output folder")
@@ -520,16 +489,74 @@ class App(ctk.CTk):
             self._update_run_button_state()
 
     def _on_ppi_change(self, label: str) -> None:
-        idx = _PPI_LABELS.index(label)
-        self._ppi = _PPI_OPTIONS[idx]
+        if label == "Custom":
+            self._custom_ppi_frame.grid()
+            self._custom_ppi_entry.delete(0, tk.END)
+            self._custom_ppi_entry.insert(0, str(self._ppi))
+            self._custom_ppi_entry.focus_set()
+            self._custom_ppi_entry.select_range(0, tk.END)
+            return
+        self._custom_ppi_frame.grid_remove()
+        self._ppi = _PPI_PRESETS[label]
+        self._save_ppi()
+
+    def _apply_custom_ppi(self) -> None:
+        raw = self._custom_ppi_entry.get().strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            return
+        value = max(_PPI_MIN, min(_PPI_MAX, value))
+        self._custom_ppi_entry.delete(0, tk.END)
+        self._custom_ppi_entry.insert(0, str(value))
+        self._ppi = value
+        self._save_ppi()
+
+    def _save_ppi(self) -> None:
         logger.debug("PPI set to %d", self._ppi)
         _save_settings({"ppi": self._ppi, "output_dir": self._output_dir})
-        if self._pptx_path:
-            self._file_card.show_file(Path(self._pptx_path), ppi=self._ppi)
+        if self._pptx_paths:
+            if len(self._pptx_paths) == 1:
+                self._file_card.show_file(
+                    Path(self._pptx_paths[0]), ppi=self._ppi)
+            else:
+                self._file_card.show_files(self._pptx_paths, ppi=self._ppi)
 
     def _on_run(self) -> None:
-        if not self._pptx_path or not self._output_dir:
+        if not self._pptx_paths or not self._output_dir:
             return
+        # Parse slide selection (single-file only).
+        self._slide_indices = None
+        if (len(self._pptx_paths) == 1
+                and self._slide_count > 1
+                and not self._all_slides_var.get()):
+            spec = self._slide_range_entry.get().strip()
+            if not spec:
+                messagebox.showwarning(
+                    "No slides specified",
+                    "Enter a slide range (e.g. 1-5, 8) or check \"All slides\".",
+                    parent=self,
+                )
+                return
+            try:
+                self._slide_indices = parse_slide_range(spec, self._slide_count)
+            except ValueError as exc:
+                messagebox.showwarning("Invalid slide range", str(exc), parent=self)
+                return
+        # Warn if the output folder already contains slide PNGs.
+        out = Path(self._output_dir)
+        glob_pattern = ("**/slide_*.png" if len(self._pptx_paths) > 1
+                        else "slide_*.png")
+        if out.is_dir() and list(out.glob(glob_pattern)):
+            ok = messagebox.askyesno(
+                "Overwrite existing files?",
+                f"The output folder already contains exported slides.\n\n"
+                f"{self._output_dir}\n\n"
+                "Existing slide PNGs will be overwritten. Continue?",
+                parent=self,
+            )
+            if not ok:
+                return
         self._error_banner.grid_remove()
         self._cancel_event = threading.Event()
         self._set_ui_busy(True)
@@ -558,19 +585,74 @@ class App(ctk.CTk):
 
     def _run_export(self) -> None:
         try:
-            self._exporter.export(
-                self._pptx_path,
-                self._output_dir,
-                progress_callback=self._on_progress,
-                cancel_event=self._cancel_event,
-                ppi=self._ppi,
-            )
+            paths = list(self._pptx_paths)
+            if len(paths) == 1:
+                self._exporter.export(
+                    paths[0],
+                    self._output_dir,
+                    progress_callback=self._on_progress,
+                    cancel_event=self._cancel_event,
+                    ppi=self._ppi,
+                    slide_indices=self._slide_indices,
+                )
+            else:
+                self._run_batch_export(paths)
             self.after(0, self._on_export_done)
         except InterruptedError:
             self.after(0, self._on_export_cancelled)
         except Exception as exc:
             logger.exception("Export failed")
-            self.after(0, self._on_export_error, str(exc))
+            msg = str(exc)
+            if self._output_dir:
+                exported = list(Path(self._output_dir).glob(
+                    "**/slide_*.png" if len(self._pptx_paths) > 1
+                    else "slide_*.png"
+                ))
+                if exported:
+                    msg += (f"\n\n{len(exported)} slide(s) were exported "
+                            "before the error.")
+            self.after(0, self._on_export_error, msg)
+
+    def _run_batch_export(self, paths: list[str]) -> None:
+        """Export multiple .pptx files, each into its own subfolder."""
+        from pptx import Presentation as PptxPresentation
+
+        slide_counts = []
+        for p in paths:
+            try:
+                slide_counts.append(len(PptxPresentation(p).slides))
+            except Exception:
+                slide_counts.append(1)
+        grand_total = sum(slide_counts)
+
+        for file_idx, pptx_path in enumerate(paths):
+            if self._cancel_event and self._cancel_event.is_set():
+                raise InterruptedError("Export cancelled by user.")
+
+            stem = Path(pptx_path).stem
+            file_out = str(Path(self._output_dir) / f"{stem}_pngs")
+            offset = sum(slide_counts[:file_idx])
+
+            def _make_cb(off, gt, fidx, fname, fcount):
+                def cb(current, total):
+                    abs_current = off + current
+                    frac = abs_current / gt if gt > 0 else 0
+                    if current < total:
+                        msg = (f"[{fidx}/{fcount}] {fname}: "
+                               f"slide {current + 1}/{total}")
+                    else:
+                        msg = f"[{fidx}/{fcount}] {fname}: done"
+                    self.after(0, self._update_progress, frac, msg)
+                return cb
+
+            self._exporter.export(
+                pptx_path,
+                file_out,
+                progress_callback=_make_cb(
+                    offset, grand_total, file_idx + 1, stem, len(paths)),
+                cancel_event=self._cancel_event,
+                ppi=self._ppi,
+            )
 
     def _on_progress(self, current: int, total: int) -> None:
         if total == 0:
@@ -589,7 +671,11 @@ class App(ctk.CTk):
 
     def _on_export_done(self) -> None:
         self._progress_bar.set(1.0)
-        self._status_var.set("Done — all slides exported.")
+        n = len(self._pptx_paths)
+        if n > 1:
+            self._status_var.set(f"Done — {n} presentations exported.")
+        else:
+            self._status_var.set("Done — all slides exported.")
         self._set_ui_busy(False)
         self._open_folder_btn.grid()
 
@@ -612,7 +698,7 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _update_run_button_state(self) -> None:
-        ready = bool(self._powerpoint_available and self._pptx_path and self._output_dir)
+        ready = bool(self._powerpoint_available and self._pptx_paths and self._output_dir)
         self._run_btn.configure(state="normal" if ready else "disabled")
 
     def _set_ui_busy(self, busy: bool) -> None:
@@ -638,7 +724,7 @@ class App(ctk.CTk):
 class _FileCard(ctk.CTkFrame):
     """Shows either a drop-prompt or a file summary card."""
 
-    def __init__(self, parent, on_browse, on_clear, dnd_available: bool = False):
+    def __init__(self, parent, on_browse, on_clear):
         super().__init__(
             parent,
             fg_color=_COLOR_BG_SURFACE,
@@ -649,7 +735,6 @@ class _FileCard(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self._on_browse = on_browse
         self._on_clear = on_clear
-        self._dnd_available = dnd_available
         self._build_empty()
         self._empty_visible = True
 
@@ -660,11 +745,8 @@ class _FileCard(ctk.CTkFrame):
         self._empty_frame.grid(row=0, column=0, sticky="ew")
         self._empty_frame.grid_columnconfigure(0, weight=1)
 
-        headline = "Drop a .pptx file here" if self._dnd_available else "No file selected"
-        subline = (
-            "or click Browse to open a file" if self._dnd_available
-            else "Click Browse to open a .pptx file"
-        )
+        headline = "No file selected"
+        subline = "Click Browse to open a .pptx file"
 
         ctk.CTkLabel(
             self._empty_frame,
@@ -744,6 +826,22 @@ class _FileCard(ctk.CTkFrame):
             self._build_file()
         self._filename_label.configure(text=path.name)
         self._meta_label.configure(text=self._read_meta(path, ppi))
+        self._file_frame.grid()
+        self._empty_visible = False
+
+    def show_files(self, paths: list[str], ppi: int = 300) -> None:
+        self._empty_frame.grid_remove()
+        if not hasattr(self, "_file_frame"):
+            self._build_file()
+        n = len(paths)
+        self._filename_label.configure(text=f"{n} files selected")
+        total_mb = sum(Path(p).stat().st_size for p in paths) / 1_048_576
+        names = [Path(p).name for p in paths[:3]]
+        meta = ", ".join(names)
+        if n > 3:
+            meta += f", +{n - 3} more"
+        meta += f"  ·  {total_mb:.1f} MB total  ·  {ppi} dpi"
+        self._meta_label.configure(text=meta)
         self._file_frame.grid()
         self._empty_visible = False
 

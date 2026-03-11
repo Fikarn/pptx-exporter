@@ -7,7 +7,7 @@ export to the appropriate platform module.
 import logging
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from .utils import (
     backend_description,
@@ -43,6 +43,7 @@ class Exporter:
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_event: Optional[threading.Event] = None,
         ppi: int = 300,
+        slide_indices: Optional[Sequence[int]] = None,
     ) -> None:
         """Validate inputs and run the export.
 
@@ -55,6 +56,8 @@ class Exporter:
             cancel_event: Optional threading.Event; when set the export is
                 aborted cleanly between slides and InterruptedError is raised.
             ppi: Output resolution in pixels per inch (default 300).
+            slide_indices: Optional sequence of 0-based slide indices to export.
+                *None* means export all slides.
 
         Raises:
             ValueError: If *pptx_path* or *output_dir* are invalid.
@@ -65,11 +68,12 @@ class Exporter:
         out = validate_output_dir(output_dir)
 
         logger.info(
-            "Starting export: pptx=%s  output=%s  backend=%s  ppi=%d",
+            "Starting export: pptx=%s  output=%s  backend=%s  ppi=%d  slides=%s",
             pptx,
             out,
             self.backend,
             ppi,
+            slide_indices if slide_indices is not None else "all",
         )
 
         if self.backend == "not_found":
@@ -79,9 +83,11 @@ class Exporter:
             )
 
         if self.backend == "macos":
-            self._export_macos(pptx, out, progress_callback, cancel_event, ppi)
+            self._export_macos(pptx, out, progress_callback, cancel_event,
+                               ppi, slide_indices)
         elif self.backend == "windows":
-            self._export_windows(pptx, out, progress_callback, cancel_event, ppi)
+            self._export_windows(pptx, out, progress_callback, cancel_event,
+                                 ppi, slide_indices)
 
         logger.info("Export complete → %s", out)
 
@@ -96,11 +102,13 @@ class Exporter:
         progress_callback: Optional[Callable[[int, int], None]],
         cancel_event: Optional[threading.Event],
         ppi: int,
+        slide_indices: Optional[Sequence[int]],
     ) -> None:
         from .platforms.macos import export_slides
 
         export_slides(pptx, out, progress_callback=progress_callback,
-                      cancel_event=cancel_event, ppi=ppi)
+                      cancel_event=cancel_event, ppi=ppi,
+                      slide_indices=slide_indices)
 
     def _export_windows(
         self,
@@ -109,8 +117,10 @@ class Exporter:
         progress_callback: Optional[Callable[[int, int], None]],
         cancel_event: Optional[threading.Event],
         ppi: int,
+        slide_indices: Optional[Sequence[int]],
     ) -> None:
         from .platforms.windows import export_slides
 
         export_slides(pptx, out, progress_callback=progress_callback,
-                      cancel_event=cancel_event, ppi=ppi)
+                      cancel_event=cancel_event, ppi=ppi,
+                      slide_indices=slide_indices)

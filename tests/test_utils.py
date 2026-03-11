@@ -9,6 +9,7 @@ from pptx_exporter.utils import (
     backend_description,
     detect_backend,
     detect_os,
+    parse_slide_range,
     slide_output_name,
     validate_output_dir,
     validate_pptx,
@@ -166,3 +167,44 @@ def test_backend_description_unknown() -> None:
     # Should return the backend name itself for unknown values
     desc = backend_description("unknown_backend")
     assert "unknown_backend" in desc
+
+
+# ---------------------------------------------------------------------------
+# parse_slide_range
+# ---------------------------------------------------------------------------
+
+
+def test_parse_slide_range_single() -> None:
+    assert parse_slide_range("3", 10) == [2]
+
+
+def test_parse_slide_range_range() -> None:
+    assert parse_slide_range("2-5", 10) == [1, 2, 3, 4]
+
+
+def test_parse_slide_range_mixed() -> None:
+    assert parse_slide_range("1-3, 7, 9-10", 10) == [0, 1, 2, 6, 8, 9]
+
+
+def test_parse_slide_range_clamps_to_total() -> None:
+    # Range extends past total — clamped to total
+    assert parse_slide_range("8-15", 10) == [7, 8, 9]
+
+
+def test_parse_slide_range_deduplicates() -> None:
+    assert parse_slide_range("1, 1, 1-3", 5) == [0, 1, 2]
+
+
+def test_parse_slide_range_invalid_raises() -> None:
+    with pytest.raises(ValueError, match="No valid slides"):
+        parse_slide_range("abc", 10)
+
+
+def test_parse_slide_range_out_of_bounds_raises() -> None:
+    with pytest.raises(ValueError, match="No valid slides"):
+        parse_slide_range("0, 11", 10)
+
+
+def test_parse_slide_range_empty_raises() -> None:
+    with pytest.raises(ValueError, match="No valid slides"):
+        parse_slide_range("", 10)
