@@ -93,8 +93,10 @@ class App(ctk.CTk):
 
         self._exporter = Exporter()
         self._pptx_paths: list[str] = []
+        self._slide_counts: dict[str, int] = {}
         self._powerpoint_available = self._exporter.backend != "not_found"
         self._cancel_event: Optional[threading.Event] = None
+        self._dnd_enabled = False
 
         settings = _load_settings()
         self._ppi: int = settings.get("ppi", 300)
@@ -104,6 +106,7 @@ class App(ctk.CTk):
         )
 
         self._build_ui()
+        self._init_dnd()
         self._update_run_button_state()
 
     # ------------------------------------------------------------------
@@ -149,19 +152,23 @@ class App(ctk.CTk):
         content.grid(row=2, column=0, sticky="ew")
         content.grid_columnconfigure(0, weight=1)
 
-        # Input file section
+        # Input files section
         ctk.CTkLabel(
             content,
-            text="INPUT FILE",
+            text="INPUT FILES",
             font=_FONT_SMALL,
             text_color=_COLOR_TEXT_SECONDARY,
             anchor="w",
         ).grid(row=0, column=0, sticky="w", padx=PAD, pady=(PAD, 4))
 
-        self._file_card = _FileCard(
-            content, on_browse=self._browse_pptx, on_clear=self._clear_pptx,
+        self._file_panel = _FilePanel(
+            content,
+            on_browse=self._browse_pptx,
+            on_clear_all=self._clear_pptx,
+            on_remove_file=self._remove_file,
+            dnd_enabled=self._dnd_enabled,
         )
-        self._file_card.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
+        self._file_panel.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
 
         # Separator
         ctk.CTkFrame(content, height=1, fg_color=_COLOR_BORDER, corner_radius=0).grid(
@@ -414,7 +421,48 @@ class App(ctk.CTk):
             )
 
     # ------------------------------------------------------------------
-    # Event handlers
+    # Drag-and-drop initialisation
+    # ------------------------------------------------------------------
+
+    def _init_dnd(self) -> None:
+        """Try to load tkdnd and register the file panel as a drop target."""
+        try:
+            from .tkdnd import init_dnd, register_drop_target
+            from .tkdnd import bind_drop, bind_drop_enter, bind_drop_leave
+            if not init_dnd(self):
+                return
+            register_drop_target(self._file_panel)
+            bind_drop(self._file_panel, self._on_drop)
+            bind_drop_enter(self._file_panel, self._on_drop_enter)
+            bind_drop_leave(self._file_panel, self._on_drop_leave)
+            self._dnd_enabled = True
+            logger.debug("Drag-and-drop enabled")
+        except Exception as exc:
+            logger.debug("Drag-and-drop unavailable: %s", exc)
+
+    def _on_drop(self, paths: tuple[str, ...]) -> None:
+        """Handle files dropped onto the file panel."""
+        pptx = [p for p in paths if p.lower().endswith(".pptx")]
+        skipped = len(paths) - len(pptx)
+        if skipped:
+            messagebox.showwarning(
+                "Unsupported files",
+                f"Only .pptx files are supported. "
+                f"{skipped} file{'s' if skipped != 1 else ''} skipped.",
+                parent=self,
+            )
+        if pptx:
+            self._add_files(pptx)
+        self._file_panel.set_drop_highlight(False)
+
+    def _on_drop_enter(self) -> None:
+        self._file_panel.set_drop_highlight(True)
+
+    def _on_drop_leave(self) -> None:
+        self._file_panel.set_drop_highlight(False)
+
+    # ------------------------------------------------------------------
+    # File management
     # ------------------------------------------------------------------
 
     def _browse_pptx(self) -> None:
@@ -422,55 +470,83 @@ class App(ctk.CTk):
             title="Select PowerPoint file(s)",
             filetypes=[("PowerPoint files", "*.pptx"), ("All files", "*.*")],
         )
-        if not paths:
+        if paths:
+            self._add_files(list(paths))
+
+    def _add_files(self, new_paths: list[str]) -> None:
+        """Validate and append new .pptx files. Warns on duplicates."""
+        dupes = [p for p in new_paths if p in self._pptx_paths]
+        if dupes:
+            names = ", ".join(Path(p).name for p in dupes)
+            messagebox.showwarning(
+                "Duplicate files",
+                f"Already added: {names}",
+                parent=self,
+            )
+        unique = [p for p in new_paths if p not in self._pptx_paths]
+        if not unique:
             return
-        if len(paths) == 1:
-            self._set_pptx(paths[0])
-        else:
-            self._set_pptx_batch(list(paths))
+
+        # Read slide counts for new files
+        for path in unique:
+            try:
+                from pptx import Presentation
+                self._slide_counts[path] = len(Presentation(path).slides)
+            except Exception:
+                self._slide_counts[path] = 0
+
+        self._pptx_paths.extend(unique)
+        logger.debug("Added %d file(s), total now %d",
+                     len(unique), len(self._pptx_paths))
+
+        # Set smart output default if not yet set
+        if self._output_dir is None:
+            if len(self._pptx_paths) == 1:
+                p = Path(self._pptx_paths[0])
+                default_out = str(p.parent / f"{p.stem}_pngs")
+            else:
+                default_out = str(Path(self._pptx_paths[0]).parent)
+            self._output_dir = default_out
+            self._out_var.set(default_out)
+
+        self._refresh_file_panel()
+        self._update_slides_section()
+        self._update_run_button_state()
+
+    def _remove_file(self, path: str) -> None:
+        """Remove a single file from the list."""
+        if path in self._pptx_paths:
+            self._pptx_paths.remove(path)
+            self._slide_counts.pop(path, None)
+        if not self._pptx_paths:
+            self._clear_pptx()
+            return
+        self._refresh_file_panel()
+        self._update_slides_section()
+        self._update_run_button_state()
 
     def _clear_pptx(self) -> None:
         self._pptx_paths = []
-        self._slide_count = 0
-        self._file_card.show_empty()
+        self._slide_counts.clear()
+        self._file_panel.show_empty()
         self._slides_frame.grid_remove()
         self._update_run_button_state()
 
-    def _set_pptx(self, path: str) -> None:
-        self._pptx_paths = [path]
-        p = Path(path)
-        # Set a smart output default: sibling folder named {stem}_pngs
-        if self._output_dir is None:
-            default_out = str(p.parent / f"{p.stem}_pngs")
-            self._output_dir = default_out
-            self._out_var.set(default_out)
-        self._file_card.show_file(p, ppi=self._ppi)
-        # Read slide count and show the slides section.
-        try:
-            from pptx import Presentation
-            self._slide_count = len(Presentation(str(p)).slides)
-        except Exception:
-            self._slide_count = 0
-        if self._slide_count > 1:
+    def _refresh_file_panel(self) -> None:
+        """Rebuild the file panel display from current state."""
+        file_infos = [(p, self._slide_counts.get(p, 0))
+                      for p in self._pptx_paths]
+        self._file_panel.set_files(file_infos)
+
+    def _update_slides_section(self) -> None:
+        """Show slide selection only for exactly 1 file with >1 slide."""
+        if (len(self._pptx_paths) == 1
+                and self._slide_counts.get(self._pptx_paths[0], 0) > 1):
             self._slides_frame.grid()
             self._all_slides_var.set(True)
             self._slide_range_entry.grid_remove()
         else:
             self._slides_frame.grid_remove()
-        logger.debug("Selected pptx: %s", path)
-        self._update_run_button_state()
-
-    def _set_pptx_batch(self, paths: list[str]) -> None:
-        self._pptx_paths = paths
-        if self._output_dir is None:
-            default_out = str(Path(paths[0]).parent)
-            self._output_dir = default_out
-            self._out_var.set(default_out)
-        self._file_card.show_files(paths, ppi=self._ppi)
-        self._slide_count = 0
-        self._slides_frame.grid_remove()
-        logger.debug("Selected %d pptx files for batch export", len(paths))
-        self._update_run_button_state()
 
     def _on_slide_selection_toggle(self) -> None:
         if self._all_slides_var.get():
@@ -515,20 +591,15 @@ class App(ctk.CTk):
     def _save_ppi(self) -> None:
         logger.debug("PPI set to %d", self._ppi)
         _save_settings({"ppi": self._ppi, "output_dir": self._output_dir})
-        if self._pptx_paths:
-            if len(self._pptx_paths) == 1:
-                self._file_card.show_file(
-                    Path(self._pptx_paths[0]), ppi=self._ppi)
-            else:
-                self._file_card.show_files(self._pptx_paths, ppi=self._ppi)
 
     def _on_run(self) -> None:
         if not self._pptx_paths or not self._output_dir:
             return
         # Parse slide selection (single-file only).
         self._slide_indices = None
+        sc = self._slide_counts.get(self._pptx_paths[0], 0)
         if (len(self._pptx_paths) == 1
-                and self._slide_count > 1
+                and sc > 1
                 and not self._all_slides_var.get()):
             spec = self._slide_range_entry.get().strip()
             if not spec:
@@ -539,7 +610,7 @@ class App(ctk.CTk):
                 )
                 return
             try:
-                self._slide_indices = parse_slide_range(spec, self._slide_count)
+                self._slide_indices = parse_slide_range(spec, sc)
             except ValueError as exc:
                 messagebox.showwarning("Invalid slide range", str(exc), parent=self)
                 return
@@ -721,10 +792,11 @@ class App(ctk.CTk):
 # Reusable sub-widgets
 # ---------------------------------------------------------------------------
 
-class _FileCard(ctk.CTkFrame):
-    """Shows either a drop-prompt or a file summary card."""
+class _FilePanel(ctk.CTkFrame):
+    """File selection panel with file list, add/remove, and drop support."""
 
-    def __init__(self, parent, on_browse, on_clear):
+    def __init__(self, parent, on_browse, on_clear_all, on_remove_file,
+                 dnd_enabled: bool = False):
         super().__init__(
             parent,
             fg_color=_COLOR_BG_SURFACE,
@@ -734,27 +806,31 @@ class _FileCard(ctk.CTkFrame):
         )
         self.grid_columnconfigure(0, weight=1)
         self._on_browse = on_browse
-        self._on_clear = on_clear
-        self._build_empty()
-        self._empty_visible = True
+        self._on_clear_all = on_clear_all
+        self._on_remove_file = on_remove_file
+        self._dnd_enabled = dnd_enabled
+        self._file_rows: dict[str, ctk.CTkFrame] = {}
 
-    # ── Empty / drop-prompt state ──────────────────────────────────────
+        self._build_empty()
+        self._build_files()
+        self._show_state_empty()
+
+    # ── Empty state ────────────────────────────────────────────────────
 
     def _build_empty(self) -> None:
         self._empty_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._empty_frame.grid(row=0, column=0, sticky="ew")
         self._empty_frame.grid_columnconfigure(0, weight=1)
-
-        headline = "No file selected"
-        subline = "Click Browse to open a .pptx file"
 
         ctk.CTkLabel(
             self._empty_frame,
-            text=headline,
+            text="No files selected",
             font=_FONT_BODY_BOLD,
             text_color=_COLOR_TEXT_PRIMARY,
         ).grid(row=0, column=0, pady=(16, 2))
 
+        subline = ("Drop .pptx files here or click Browse"
+                   if self._dnd_enabled
+                   else "Click Browse to open .pptx files")
         ctk.CTkLabel(
             self._empty_frame,
             text=subline,
@@ -764,7 +840,7 @@ class _FileCard(ctk.CTkFrame):
 
         ctk.CTkButton(
             self._empty_frame,
-            text="Browse…",
+            text="Browse\u2026",
             command=self._on_browse,
             width=110,
             font=_FONT_BODY,
@@ -772,28 +848,131 @@ class _FileCard(ctk.CTkFrame):
             hover_color=_COLOR_ACCENT_HOVER,
         ).grid(row=2, column=0, pady=(0, 16))
 
-    def _build_file(self) -> None:
-        self._file_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._file_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
-        self._file_frame.grid_columnconfigure(0, weight=1)
+    # ── Files-loaded state ─────────────────────────────────────────────
 
-        name_row = ctk.CTkFrame(self._file_frame, fg_color="transparent")
-        name_row.grid(row=0, column=0, sticky="ew")
-        name_row.grid_columnconfigure(0, weight=1)
+    def _build_files(self) -> None:
+        self._files_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self._files_frame.grid_columnconfigure(0, weight=1)
 
-        self._filename_label = ctk.CTkLabel(
-            name_row,
-            text="",
-            font=_FONT_BODY_BOLD,
-            text_color=_COLOR_TEXT_PRIMARY,
-            anchor="w",
-        )
-        self._filename_label.grid(row=0, column=0, sticky="w")
+        # Scrollable list area for file rows
+        self._list_frame = ctk.CTkFrame(self._files_frame, fg_color="transparent")
+        self._list_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 0))
+        self._list_frame.grid_columnconfigure(0, weight=1)
+
+        # Separator
+        ctk.CTkFrame(
+            self._files_frame, height=1, fg_color=_COLOR_BORDER, corner_radius=0,
+        ).grid(row=1, column=0, sticky="ew", padx=12, pady=(8, 0))
+
+        # Bottom bar: + Add files  |  Clear all
+        btn_bar = ctk.CTkFrame(self._files_frame, fg_color="transparent")
+        btn_bar.grid(row=2, column=0, sticky="ew", padx=12, pady=(6, 10))
+        btn_bar.grid_columnconfigure(0, weight=1)
 
         ctk.CTkButton(
-            name_row,
-            text="✕",
-            command=self._on_clear,
+            btn_bar,
+            text="+ Add files",
+            command=self._on_browse,
+            width=100,
+            height=28,
+            font=_FONT_SMALL,
+            fg_color="transparent",
+            text_color=_COLOR_ACCENT,
+            hover_color=_COLOR_BG_BASE,
+            border_width=1,
+            border_color=_COLOR_ACCENT,
+            corner_radius=4,
+        ).grid(row=0, column=0, sticky="w")
+
+        ctk.CTkButton(
+            btn_bar,
+            text="Clear all",
+            command=self._on_clear_all,
+            width=80,
+            height=28,
+            font=_FONT_SMALL,
+            fg_color="transparent",
+            text_color=_COLOR_TEXT_SECONDARY,
+            hover_color=_COLOR_BG_BASE,
+            border_width=1,
+            border_color=_COLOR_BORDER,
+            corner_radius=4,
+        ).grid(row=0, column=1, sticky="e")
+
+    # ── State switching ────────────────────────────────────────────────
+
+    def _show_state_empty(self) -> None:
+        self._files_frame.grid_remove()
+        self._empty_frame.grid(row=0, column=0, sticky="ew")
+
+    def _show_state_files(self) -> None:
+        self._empty_frame.grid_remove()
+        self._files_frame.grid(row=0, column=0, sticky="ew")
+
+    # ── Public API ─────────────────────────────────────────────────────
+
+    def set_files(self, file_infos: list[tuple[str, int]]) -> None:
+        """Update the displayed file list.
+
+        *file_infos*: list of ``(path, slide_count)`` tuples.
+        """
+        if not file_infos:
+            self.show_empty()
+            return
+
+        # Clear existing rows
+        for widget in self._file_rows.values():
+            widget.destroy()
+        self._file_rows.clear()
+
+        for i, (path, slide_count) in enumerate(file_infos):
+            self._add_row(i, path, slide_count)
+
+        self._show_state_files()
+
+    def show_empty(self) -> None:
+        """Reset to the empty / no-files state."""
+        for widget in self._file_rows.values():
+            widget.destroy()
+        self._file_rows.clear()
+        self._show_state_empty()
+
+    def set_drop_highlight(self, active: bool) -> None:
+        """Toggle accent border for drag-over visual feedback."""
+        self.configure(
+            border_color=_COLOR_ACCENT if active else _COLOR_BORDER,
+        )
+
+    # ── Row construction ───────────────────────────────────────────────
+
+    def _add_row(self, index: int, path: str, slide_count: int) -> None:
+        row = ctk.CTkFrame(self._list_frame, fg_color="transparent")
+        row.grid(row=index, column=0, sticky="ew", pady=(0, 2))
+        row.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            row,
+            text=Path(path).name,
+            font=_FONT_BODY,
+            text_color=_COLOR_TEXT_PRIMARY,
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+
+        if slide_count > 0:
+            slides_text = f"{slide_count} slide{'s' if slide_count != 1 else ''}"
+            ctk.CTkLabel(
+                row,
+                text=slides_text,
+                font=_FONT_SMALL,
+                text_color=_COLOR_TEXT_SECONDARY,
+                anchor="e",
+            ).grid(row=0, column=1, padx=(8, 0))
+
+        p = path  # capture for lambda closure
+        ctk.CTkButton(
+            row,
+            text="\u2715",
+            command=lambda: self._on_remove_file(p),
             width=24,
             height=24,
             font=_FONT_SMALL,
@@ -801,66 +980,9 @@ class _FileCard(ctk.CTkFrame):
             text_color=_COLOR_TEXT_SECONDARY,
             hover_color=_COLOR_BORDER,
             corner_radius=4,
-        ).grid(row=0, column=1, padx=(8, 0))
+        ).grid(row=0, column=2, padx=(4, 0))
 
-        self._meta_label = ctk.CTkLabel(
-            self._file_frame,
-            text="",
-            font=_FONT_SMALL,
-            text_color=_COLOR_TEXT_SECONDARY,
-            anchor="w",
-        )
-        self._meta_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
-
-    # ── Public API ─────────────────────────────────────────────────────
-
-    def show_empty(self) -> None:
-        if hasattr(self, "_file_frame"):
-            self._file_frame.grid_remove()
-        self._empty_frame.grid()
-        self._empty_visible = True
-
-    def show_file(self, path: Path, ppi: int = 300) -> None:
-        self._empty_frame.grid_remove()
-        if not hasattr(self, "_file_frame"):
-            self._build_file()
-        self._filename_label.configure(text=path.name)
-        self._meta_label.configure(text=self._read_meta(path, ppi))
-        self._file_frame.grid()
-        self._empty_visible = False
-
-    def show_files(self, paths: list[str], ppi: int = 300) -> None:
-        self._empty_frame.grid_remove()
-        if not hasattr(self, "_file_frame"):
-            self._build_file()
-        n = len(paths)
-        self._filename_label.configure(text=f"{n} files selected")
-        total_mb = sum(Path(p).stat().st_size for p in paths) / 1_048_576
-        names = [Path(p).name for p in paths[:3]]
-        meta = ", ".join(names)
-        if n > 3:
-            meta += f", +{n - 3} more"
-        meta += f"  ·  {total_mb:.1f} MB total  ·  {ppi} dpi"
-        self._meta_label.configure(text=meta)
-        self._file_frame.grid()
-        self._empty_visible = False
-
-    @staticmethod
-    def _read_meta(path: Path, ppi: int = 300) -> str:
-        try:
-            from pptx import Presentation
-            prs = Presentation(str(path))
-            n = len(prs.slides)
-            w_pt = prs.slide_width / 12700
-            h_pt = prs.slide_height / 12700
-            w_px = int(round(w_pt / 72 * ppi))
-            h_px = int(round(h_pt / 72 * ppi))
-            size_mb = path.stat().st_size / 1_048_576
-            slides = f"{n} slide{'s' if n != 1 else ''}"
-            return f"{slides}  ·  {size_mb:.1f} MB  ·  {w_px} × {h_px} px @ {ppi} dpi"
-        except Exception:
-            size_mb = path.stat().st_size / 1_048_576
-            return f"{size_mb:.1f} MB"
+        self._file_rows[path] = row
 
 
 class _ErrorBanner(ctk.CTkFrame):

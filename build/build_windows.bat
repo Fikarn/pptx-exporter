@@ -15,6 +15,7 @@ pyinstaller ^
   --hidden-import "pptx_exporter.platforms.windows" ^
   --hidden-import "lxml.etree" ^
   --hidden-import "lxml._elementpath" ^
+  --add-data "src\pptx_exporter\tkdnd\windows-x64;pptx_exporter\tkdnd\windows-x64" ^
   --noconfirm ^
   run.py
 

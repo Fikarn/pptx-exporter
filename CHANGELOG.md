@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-11
+
+### Added
+- **Drag-and-drop**: drop `.pptx` files onto the file panel to add them. Uses vendored tkdnd 2.9.5 binaries with Tcl 9 support (macOS) and Tcl 8.6 (Windows). Falls back gracefully to browse-only if tkdnd cannot load.
+- **Improved batch UX**: file panel now shows a scrollable list of loaded files with per-file remove buttons, an "Add files" button to append more files, and "Clear all" to reset. Browsing and dropping always appends to the existing list instead of replacing it.
+- Duplicate file detection: warns when the same file is added twice.
+- Non-`.pptx` file rejection: warns and skips unsupported files when dropped.
+- Visual drop feedback: file panel border highlights on drag-over.
+
+### Changed
+- Section label renamed from "INPUT FILE" to "INPUT FILES".
+- `_FileCard` widget replaced by `_FilePanel` with richer file list display.
+
 ## [1.1.0] - 2026-03-11
 
 ### Added
@@ -98,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Fikarn/pptx-exporter/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.1...v1.0.2

@@ -16,6 +16,8 @@ pyinstaller \
   --hidden-import "pptx_exporter.platforms.windows" \
   --hidden-import "lxml.etree" \
   --hidden-import "lxml._elementpath" \
+  --add-data "src/pptx_exporter/tkdnd/macos-arm64:pptx_exporter/tkdnd/macos-arm64" \
+  --add-data "src/pptx_exporter/tkdnd/macos-x86_64:pptx_exporter/tkdnd/macos-x86_64" \
   --osx-bundle-identifier "com.fikarn.pptx-exporter" \
   --noconfirm \
   run.py
