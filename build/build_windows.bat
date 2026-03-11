@@ -11,6 +11,7 @@ pyinstaller ^
   --name pptx-exporter ^
   --collect-all customtkinter ^
   --collect-all darkdetect ^
+  --hidden-import "pptx_exporter.gui.app" ^
   --hidden-import "pptx_exporter.platforms.macos" ^
   --hidden-import "pptx_exporter.platforms.windows" ^
   --hidden-import "lxml.etree" ^

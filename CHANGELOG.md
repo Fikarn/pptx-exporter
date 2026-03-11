@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-11
+
+### Changed
+- **Complete GUI redesign** ("Quiet Utility"): new layout splits the interface into a File Card, Settings Card, and Action Area, replacing the previous flat vertical form.
+- **File Card**: large drop zone is the primary empty state; switches to a compact file list with icon, slide count, and remove button per file. Scrollable via `CTkScrollableFrame` when more than 4 files are loaded.
+- **Settings Card**: Resolution, Slides, and Output rows consolidated into a single rounded card with internal dividers. Resolution presets now show as `72 / 150 / 300 / Custom` labels (previously `72 dpi` etc.).
+- **Action Area**: Export button is taller (44px) with a disabled-state hint line ("Select a file to begin" / "PowerPoint not found"). Progress bar is slimmer (4px). Open Folder button appears inline below the progress bar after a successful export.
+- **Error banner**: redesigned with a red left-border accent instead of a full red background; dismiss button is an ✕ icon.
+- **Inline validation**: slide range errors and duplicate-file warnings now appear inline instead of `messagebox.showwarning()` popups.
+- **Keyboard shortcuts**: Cmd+O / Ctrl+O opens the file browser; Escape cancels an in-progress export.
+- **Code structure**: `gui.py` (1028 lines) replaced by a `gui/` package — `app.py`, `tokens.py`, `settings.py`, and `widgets/` sub-package with one file per widget class.
+- Build scripts updated with `--hidden-import pptx_exporter.gui.app`.
+
 ## [1.2.0] - 2026-03-11
 
 ### Added
@@ -111,7 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Fikarn/pptx-exporter/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Fikarn/pptx-exporter/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.2...v1.0.3
