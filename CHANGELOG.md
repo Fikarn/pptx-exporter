@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-11
+
 ### Added
 - **Batch export**: select multiple `.pptx` files at once; each is exported into its own subfolder with aggregate progress tracking.
 - **Per-slide selection**: uncheck "All slides" and enter a range (e.g. `1-5, 8, 10-12`) to export only specific slides.
@@ -96,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml` following PEP 517/518; version is the single source of truth.
 - MIT License.
 
-[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/Fikarn/pptx-exporter/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Fikarn/pptx-exporter/compare/v1.0.0...v1.0.1
