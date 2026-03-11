@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Batch export**: select multiple `.pptx` files at once; each is exported into its own subfolder with aggregate progress tracking.
+- **Per-slide selection**: uncheck "All slides" and enter a range (e.g. `1-5, 8, 10-12`) to export only specific slides.
+- **Custom PPI**: enter any resolution between 36 and 2400 dpi in addition to the 72/150/300 presets.
+- **macOS .dmg packaging**: the macOS build now produces a DMG disk image with an Applications symlink for drag-to-install.
+- **Accessibility pre-flight check** on macOS: warns immediately if System Events access is not granted, instead of silently producing empty exports.
+- **Overwrite warning**: prompts before exporting into a folder that already contains slide PNGs.
+- Partial export indication: error messages now report how many slides were exported before a failure.
+- CLAUDE.md for repository context.
+
+### Changed
+- **Windows backend rewritten** to use clipboard as the primary export method (PNG format preferred, CF_DIB 32bpp BGRA fallback), with a fallback chain to `ShapeRange.Export` and `slide.Export`.
+- Windows backend now computes target pixel dimensions from PPI (was previously ignored).
+- Windows backend adds `pythoncom.CoInitialize()`/`CoUninitialize()` for COM thread safety.
+- macOS backend replaces hardcoded AppleScript delays with polling loops for PowerPoint readiness.
+- macOS backend retries clipboard read up to 3 times per slide to handle timing races.
+- CI now runs tests on macOS and Windows runners (previously Ubuntu only); lint separated into its own job.
+- Release workflow publishes `.dmg` for macOS instead of `.zip`.
+- Dynamic version via `importlib.metadata` instead of hardcoded `__init__.__version__`.
+
+### Removed
+- `platforms/fallback.py` (dead code since v0.2.0).
+- tkinterdnd2 dependency and vendored tkdnd binary (drag-and-drop broken on macOS/Tcl 9).
+
 ## [1.0.3] - 2026-03-10
 
 ### Fixed
@@ -34,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Modern GUI redesign built on CustomTkinter with system light/dark mode support.
-- Drag-and-drop infrastructure (tkdnd 2.9.5 vendored binary built for Tcl/Tk 9.0).
+- Drag-and-drop infrastructure (tkdnd 2.9.5 vendored binary built for Tcl/Tk 9.0; later removed due to Tcl 9 incompatibility).
 - Cancel button: cleanly aborts an in-progress export between slides.
 - Open Folder button: appears after a successful export to reveal the output directory.
 - File metadata card: shows slide count, file size, and output pixel dimensions after selecting a file.
