@@ -2,14 +2,11 @@
 
 import customtkinter as ctk
 
-from ..tokens import COLORS, FONTS, SP
+from ..tokens import COLORS, FONTS, RADIUS, SP
 
 
 class ErrorBanner(ctk.CTkFrame):
-    """Inline error banner shown below the action area on failure.
-
-    Uses a red left border accent instead of a full red background.
-    """
+    """Inline error banner shown below the action area on failure."""
 
     def __init__(self, parent, on_dismiss):
         super().__init__(parent, fg_color="transparent", corner_radius=0)
@@ -20,12 +17,15 @@ class ErrorBanner(ctk.CTkFrame):
 
         # Red left accent bar
         self._accent = ctk.CTkFrame(
-            self, width=3, fg_color=COLORS["error"], corner_radius=0,
+            self, width=4, fg_color=COLORS["error"], corner_radius=0,
         )
         self._accent.grid(row=0, column=0, sticky="ns")
 
         # Message area
-        msg_frame = ctk.CTkFrame(self, fg_color=COLORS["error_bg"], corner_radius=0)
+        msg_frame = ctk.CTkFrame(
+            self, fg_color=COLORS["error_bg"],
+            corner_radius=0,
+        )
         msg_frame.grid(row=0, column=1, sticky="nsew")
         msg_frame.grid_columnconfigure(0, weight=1)
 
@@ -38,9 +38,11 @@ class ErrorBanner(ctk.CTkFrame):
             wraplength=420,
             justify="left",
         )
-        self._msg_label.grid(row=0, column=0, sticky="ew", padx=SP["sm"], pady=SP["sm"])
+        self._msg_label.grid(
+            row=0, column=0, sticky="ew",
+            padx=SP["sm"], pady=SP["sm"],
+        )
 
-        # Dismiss button inside message area
         ctk.CTkButton(
             msg_frame,
             text="\u2715",
@@ -51,7 +53,7 @@ class ErrorBanner(ctk.CTkFrame):
             fg_color="transparent",
             text_color=COLORS["error_text"],
             hover_color=COLORS["error_bg"],
-            corner_radius=4,
+            corner_radius=RADIUS["sm"],
         ).grid(row=0, column=1, padx=(0, SP["sm"]), pady=SP["sm"])
 
     def show(self, message: str) -> None:

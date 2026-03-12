@@ -4,18 +4,18 @@ from pathlib import Path
 
 import customtkinter as ctk
 
-from ..tokens import COLORS, FONTS, SP
+from ..tokens import COLORS, FONTS, RADIUS, SP
 
 
 class FileList(ctk.CTkFrame):
     """Loaded-state file panel: scrollable file list with add/remove controls."""
 
-    # Switch to scrollable frame when file count exceeds this
     _SCROLL_THRESHOLD = 4
 
     def __init__(self, parent, on_browse, on_clear_all, on_remove_file):
         super().__init__(parent, fg_color="transparent")
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)  # list area expands
         self._on_browse = on_browse
         self._on_clear_all = on_clear_all
         self._on_remove_file = on_remove_file
@@ -51,10 +51,10 @@ class FileList(ctk.CTkFrame):
             font=FONTS["caption"],
             fg_color="transparent",
             text_color=COLORS["accent"],
-            hover_color=COLORS["surface_hover"],
+            hover_color=COLORS["accent_muted"],
             border_width=1,
             border_color=COLORS["accent"],
-            corner_radius=6,
+            corner_radius=RADIUS["sm"],
         ).grid(row=0, column=0, sticky="w")
 
         ctk.CTkButton(
@@ -69,17 +69,15 @@ class FileList(ctk.CTkFrame):
             hover_color=COLORS["surface_hover"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=6,
+            corner_radius=RADIUS["sm"],
         ).grid(row=0, column=1, sticky="e")
 
     def set_files(self, file_infos: list[tuple[str, int]]) -> None:
         """Rebuild the file list from a list of (path, slide_count) tuples."""
-        # Clear old rows
         for widget in self._file_rows.values():
             widget.destroy()
         self._file_rows.clear()
 
-        # Decide whether to use scrollable container
         use_scroll = len(file_infos) > self._SCROLL_THRESHOLD
 
         if self._scrollable is not None:
@@ -89,12 +87,10 @@ class FileList(ctk.CTkFrame):
         if use_scroll:
             self._list_container.grid_remove()
             self._scrollable = ctk.CTkScrollableFrame(
-                self,
-                fg_color="transparent",
-                height=140,
+                self, fg_color="transparent", height=140,
             )
             self._scrollable.grid(
-                row=0, column=0, sticky="ew",
+                row=0, column=0, sticky="nsew",
                 padx=SP["md"], pady=(SP["sm"], 0),
             )
             self._scrollable.grid_columnconfigure(0, weight=1)
@@ -109,14 +105,14 @@ class FileList(ctk.CTkFrame):
     def _add_row(
         self, parent, index: int, path: str, slide_count: int,
     ) -> None:
-        row = ctk.CTkFrame(parent, fg_color="transparent", height=30)
-        row.grid(row=index, column=0, sticky="ew", pady=(0, 2))
+        row = ctk.CTkFrame(parent, fg_color="transparent", height=34)
+        row.grid(row=index, column=0, sticky="ew", pady=(0, SP["xs"]))
         row.grid_columnconfigure(1, weight=1)
 
-        # File icon
+        # File icon — simple document glyph
         ctk.CTkLabel(
-            row, text="\U0001F4C4", font=("system-ui", 13),
-            width=20,
+            row, text="\u25A1", font=(FONTS["body"][0], 13),
+            text_color=COLORS["text_tertiary"], width=20,
         ).grid(row=0, column=0, padx=(0, SP["xs"]))
 
         # Filename
@@ -128,13 +124,13 @@ class FileList(ctk.CTkFrame):
             anchor="w",
         ).grid(row=0, column=1, sticky="w")
 
-        # Slide count
+        # Slide count — monospace
         if slide_count > 0:
             text = f"{slide_count} slide{'s' if slide_count != 1 else ''}"
             ctk.CTkLabel(
                 row,
                 text=text,
-                font=FONTS["caption"],
+                font=FONTS["mono_sm"],
                 text_color=COLORS["text_tertiary"],
                 anchor="e",
             ).grid(row=0, column=2, padx=(SP["sm"], 0))
@@ -151,7 +147,26 @@ class FileList(ctk.CTkFrame):
             fg_color="transparent",
             text_color=COLORS["text_tertiary"],
             hover_color=COLORS["surface_hover"],
-            corner_radius=4,
+            corner_radius=RADIUS["sm"],
         ).grid(row=0, column=3, padx=(SP["xs"], 0))
+
+        # Hover effect (debounced to avoid flicker with child widgets)
+        row._hover_after = None
+
+        def _on_enter(e, r=row):
+            if r._hover_after:
+                r.after_cancel(r._hover_after)
+                r._hover_after = None
+            r.configure(fg_color=COLORS["surface_hover"])
+
+        def _on_leave(e, r=row):
+            if r._hover_after:
+                r.after_cancel(r._hover_after)
+            r._hover_after = r.after(
+                10, lambda: r.configure(fg_color="transparent"),
+            )
+
+        row.bind("<Enter>", _on_enter)
+        row.bind("<Leave>", _on_leave)
 
         self._file_rows[path] = row

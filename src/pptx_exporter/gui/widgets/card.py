@@ -2,7 +2,7 @@
 
 import customtkinter as ctk
 
-from ..tokens import COLORS, SP
+from ..tokens import COLORS, RADIUS, SP
 
 
 class Card(ctk.CTkFrame):
@@ -13,11 +13,12 @@ class Card(ctk.CTkFrame):
             fg_color=COLORS["surface"],
             border_color=COLORS["border"],
             border_width=1,
-            corner_radius=12,
+            corner_radius=RADIUS["md"],
         )
         defaults.update(kwargs)
         super().__init__(parent, **defaults)
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         self._pad = SP["md"]
 
     def content_pad(self) -> dict:

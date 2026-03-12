@@ -14,7 +14,7 @@ import customtkinter as ctk
 from ..exporter import Exporter
 from ..utils import configure_logging, parse_slide_range
 from .settings import load_settings, save_settings
-from .tokens import COLORS, FONTS, SP
+from .tokens import COLORS, FONTS, RADIUS, SP, init_fonts
 from .widgets import (
     ActionArea,
     ErrorBanner,
@@ -25,8 +25,15 @@ from .widgets import (
 
 logger = logging.getLogger(__name__)
 
-ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("blue")
+
+
+def _app_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("pptx-exporter")
+    except Exception:
+        return ""
 
 
 class App(ctk.CTk):
@@ -34,11 +41,12 @@ class App(ctk.CTk):
 
     def __init__(self) -> None:
         super().__init__()
+        init_fonts()
         configure_logging()
 
         self.title("pptx-exporter")
-        self.resizable(True, False)
-        self.minsize(540, 0)
+        self.resizable(True, True)
+        self.minsize(560, 0)
 
         self._exporter = Exporter()
         self._pptx_paths: list[str] = []
@@ -49,6 +57,8 @@ class App(ctk.CTk):
 
         settings = load_settings()
         self._ppi: int = settings.get("ppi", 300)
+        self._theme = settings.get("theme", "light")
+        ctk.set_appearance_mode(self._theme)
         saved_out = settings.get("output_dir")
         self._output_dir: Optional[str] = (
             saved_out if saved_out and os.path.isdir(saved_out) else None
@@ -70,40 +80,83 @@ class App(ctk.CTk):
     def _build_ui(self) -> None:
         self.configure(fg_color=COLORS["bg"])
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)  # content row expands
 
-        # ── Toolbar ────────────────────────────────────────────────────
+        # -- Toolbar -----------------------------------------------------------
         toolbar = ctk.CTkFrame(self, fg_color=COLORS["surface"], corner_radius=0)
         toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.grid_columnconfigure(0, weight=1)
+        toolbar.grid_columnconfigure(1, weight=1)
+
+        # Left accent stripe
+        ctk.CTkFrame(
+            toolbar, width=4, fg_color=COLORS["accent"], corner_radius=0,
+        ).grid(row=0, column=0, sticky="ns")
+
+        # Title area
+        title_frame = ctk.CTkFrame(toolbar, fg_color="transparent")
+        title_frame.grid(row=0, column=1, sticky="w", padx=SP["md"], pady=SP["md"])
 
         ctk.CTkLabel(
-            toolbar,
-            text="pptx-exporter",
+            title_frame,
+            text="PPTX EXPORTER",
             font=FONTS["title"],
             text_color=COLORS["text_primary"],
             anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=SP["lg"], pady=SP["md"])
+        ).grid(row=0, column=0, sticky="w")
 
+        # Version badge
+        ver = _app_version()
+        if ver:
+            ctk.CTkLabel(
+                title_frame,
+                text=f"v{ver}",
+                font=FONTS["caption"],
+                text_color=COLORS["text_tertiary"],
+                anchor="w",
+            ).grid(row=0, column=1, sticky="w", padx=(SP["sm"], 0))
+
+        # Status pill
         self._status_pill = StatusPill(toolbar)
         self._status_pill.grid(
-            row=0, column=1, sticky="e", padx=SP["lg"], pady=SP["md"],
+            row=0, column=2, sticky="e", padx=SP["md"], pady=SP["md"],
         )
         if self._powerpoint_available:
             self._status_pill.set_ready()
         else:
             self._status_pill.set_error()
 
+        # Theme toggle
+        theme_icon = "\u2600" if self._theme == "light" else "\u263D"
+        self._theme_btn = ctk.CTkButton(
+            toolbar,
+            text=theme_icon,
+            command=self._toggle_theme,
+            width=32,
+            height=32,
+            font=(FONTS["body"][0], 16),
+            fg_color="transparent",
+            text_color=COLORS["text_secondary"],
+            hover_color=COLORS["surface_hover"],
+            corner_radius=RADIUS["sm"],
+        )
+        self._theme_btn.grid(
+            row=0, column=3, sticky="e", padx=(0, SP["md"]), pady=SP["md"],
+        )
+
         # Toolbar bottom border
         ctk.CTkFrame(
             self, height=1, fg_color=COLORS["border"], corner_radius=0,
         ).grid(row=1, column=0, sticky="ew")
 
-        # ── Content area ───────────────────────────────────────────────
+        # -- Content area ------------------------------------------------------
         content = ctk.CTkFrame(self, fg_color="transparent")
-        content.grid(row=2, column=0, sticky="ew", padx=SP["lg"], pady=SP["lg"])
+        content.grid(
+            row=2, column=0, sticky="nsew", padx=SP["lg"], pady=SP["lg"],
+        )
         content.grid_columnconfigure(0, weight=1)
+        content.grid_rowconfigure(0, weight=1)  # file panel grows
 
-        # File panel (drop zone / file list)
+        # File panel (drop zone / file list) — expandable
         self._file_panel = FilePanel(
             content,
             on_browse=self._browse_pptx,
@@ -111,9 +164,11 @@ class App(ctk.CTk):
             on_remove_file=self._remove_file,
             dnd_enabled=self._dnd_enabled,
         )
-        self._file_panel.grid(row=0, column=0, sticky="ew", pady=(0, SP["md"]))
+        self._file_panel.grid(
+            row=0, column=0, sticky="nsew", pady=(0, SP["md"]),
+        )
 
-        # Settings card (resolution + slides + output)
+        # Settings card — pinned to bottom
         self._settings_card = SettingsCard(
             content,
             initial_ppi=self._ppi,
@@ -122,25 +177,25 @@ class App(ctk.CTk):
             on_browse_output=self._browse_output,
             on_slide_toggle=self._on_slide_toggle,
         )
-        self._settings_card.grid(row=1, column=0, sticky="ew", pady=(0, SP["md"]))
+        self._settings_card.grid(row=1, column=0, sticky="sew", pady=(0, SP["md"]))
 
-        # Action area (export/cancel/progress)
+        # Action area — pinned to bottom
         self._action_area = ActionArea(
             content,
             on_run=self._on_run,
             on_cancel=self._on_cancel,
             on_open_folder=self._open_output_folder,
         )
-        self._action_area.grid(row=2, column=0, sticky="ew", pady=(0, SP["sm"]))
+        self._action_area.grid(row=2, column=0, sticky="sew", pady=(0, SP["sm"]))
 
-        # Error banner (hidden)
+        # Error banner (hidden) — pinned to bottom
         self._error_banner = ErrorBanner(content, on_dismiss=self._dismiss_error)
-        self._error_banner.grid(row=3, column=0, sticky="ew")
+        self._error_banner.grid(row=3, column=0, sticky="sew")
         self._error_banner.grid_remove()
 
         # Set minimum height
         self.update_idletasks()
-        self.minsize(540, self.winfo_reqheight())
+        self.minsize(560, self.winfo_reqheight())
 
     # ------------------------------------------------------------------
     # Drag-and-drop
@@ -269,13 +324,13 @@ class App(ctk.CTk):
             self._output_dir = path
             self._settings_card.set_output_dir(path)
             logger.debug("Selected output dir: %s", path)
-            save_settings({"ppi": self._ppi, "output_dir": path})
+            self._save_settings()
             self._update_export_state()
 
     def _on_ppi_change(self, value: int) -> None:
         self._ppi = value
         logger.debug("PPI set to %d", self._ppi)
-        save_settings({"ppi": self._ppi, "output_dir": self._output_dir})
+        self._save_settings()
 
     # ------------------------------------------------------------------
     # Export
@@ -439,7 +494,6 @@ class App(ctk.CTk):
             msg = f"Done \u2014 {n} presentations exported."
         else:
             msg = "Done \u2014 all slides exported."
-        # Restore run button, then show done state (keeps progress visible)
         self._action_area.set_busy(False)
         self._action_area.show_done(msg)
         self._update_export_state()
@@ -458,6 +512,20 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _toggle_theme(self) -> None:
+        self._theme = "dark" if self._theme == "light" else "light"
+        ctk.set_appearance_mode(self._theme)
+        icon = "\u2600" if self._theme == "light" else "\u263D"
+        self._theme_btn.configure(text=icon)
+        self._save_settings()
+
+    def _save_settings(self) -> None:
+        save_settings({
+            "ppi": self._ppi,
+            "output_dir": self._output_dir,
+            "theme": self._theme,
+        })
 
     def _update_export_state(self) -> None:
         ready = bool(

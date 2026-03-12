@@ -18,8 +18,9 @@ class FilePanel(Card):
         self._drop_zone = DropZone(self, on_browse, dnd_enabled)
         self._file_list = FileList(self, on_browse, on_clear_all, on_remove_file)
 
-        self._drop_zone.grid(row=0, column=0, sticky="ew")
-        self._file_list.grid(row=0, column=0, sticky="ew")
+        # Both children fill the card; only one visible at a time
+        self._drop_zone.grid(row=0, column=0, sticky="nsew")
+        self._file_list.grid(row=0, column=0, sticky="nsew")
         self._file_list.grid_remove()
 
     def show_empty(self) -> None:
